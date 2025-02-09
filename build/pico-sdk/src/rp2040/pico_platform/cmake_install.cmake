@@ -1,4 +1,4 @@
-# Install script for directory: /home/mcdanibj/pico-test/pico-sdk/src/rp2040/pico_platform
+# Install script for directory: /home/bubba/robomasters/SupaCap_Software/pico-sdk/src/rp2040/pico_platform
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

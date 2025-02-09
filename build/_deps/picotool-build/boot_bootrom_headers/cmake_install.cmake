@@ -1,8 +1,8 @@
-# Install script for directory: /home/mcdanibj/pico-test/pico-sdk/src/rp2_common/boot_bootrom_headers
+# Install script for directory: /home/bubba/robomasters/SupaCap_Software/pico-sdk/src/rp2_common/boot_bootrom_headers
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
-  set(CMAKE_INSTALL_PREFIX "/home/mcdanibj/SupaCap_Software/build/_deps")
+  set(CMAKE_INSTALL_PREFIX "/home/bubba/robomasters/SupaCap_Software/build/_deps")
 endif()
 string(REGEX REPLACE "/$" "" CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
 

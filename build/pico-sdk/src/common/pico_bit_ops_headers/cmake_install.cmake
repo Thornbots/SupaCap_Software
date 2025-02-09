@@ -1,4 +1,4 @@
-# Install script for directory: /home/mcdanibj/pico-test/pico-sdk/src/common/pico_bit_ops_headers
+# Install script for directory: /home/bubba/robomasters/SupaCap_Software/pico-sdk/src/common/pico_bit_ops_headers
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

@@ -1,4 +1,4 @@
-# Install script for directory: /home/mcdanibj/pico-test/pico-sdk/src/rp2_common/pico_printf
+# Install script for directory: /home/bubba/robomasters/SupaCap_Software/pico-sdk/src/rp2_common/pico_printf
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
