@@ -2,37 +2,37 @@
 	"sources" : 
 	[
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/CMakeFiles/picotoolBuild"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/CMakeFiles/picotoolBuild"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/CMakeFiles/picotoolBuild.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/CMakeFiles/picotoolBuild.rule"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/CMakeFiles/picotoolBuild-complete.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/CMakeFiles/picotoolBuild-complete.rule"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-build.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-build.rule"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-configure.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-configure.rule"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-download.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-download.rule"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-install.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-install.rule"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-mkdir.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-mkdir.rule"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-patch.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-patch.rule"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-test.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-test.rule"
 		},
 		{
-			"file" : "/home/mcdanibj/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-update.rule"
+			"file" : "/home/bubba/robomasters/SupaCap_Software/build/picotool/src/picotoolBuild-stamp/picotoolBuild-update.rule"
 		}
 	],
 	"target" : 
