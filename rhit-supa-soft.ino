@@ -32,15 +32,15 @@ TwoWire sensorWire{ SENSOR_SDA_PIN, SENSOR_SCL_PIN };
 //function to read all values from cap bank with minimum calls
 void readFromCapBank(float* outputCurrent, float* bankVoltage, float* bankEnergy) {
 
-  //mA to A conversion. Use outputCurrent variable as a placeholder for the bank current before converting
-  *outputCurrent = ina219.getCurrent_mA() * 1000.0f;
+  //mA to A conversion.
+  float bankCurrent = ina219.getCurrent_mA() / 1000.0f;
 
   //add up the voltages this could be wrong idk
   *bankVoltage = ina219.getBusVoltage_V() + ina219.getShuntVoltage_mV() / 1000;
 
   //gets the current after the boost converter
   //temp transform with a div by 0 check. The 0.9 is to account for boost ineffecieny
-  *outputCurrent = *bankVoltage > 0 ? (*outputCurrent * OUTPUT_VOLTAGE / *bankVoltage / 0.9f) : 0;
+  *outputCurrent = *bankVoltage > 0.01f ? (bankCurrent * OUTPUT_VOLTAGE / *bankVoltage / 0.9f) : 0;
 
   // 1/2 cv^2 our favorite
   *bankEnergy = 0.5f * CAPACITANCE * pow(*bankVoltage, 2);
@@ -49,19 +49,22 @@ void readFromCapBank(float* outputCurrent, float* bankVoltage, float* bankEnergy
 //PWM pins and parameters =============================================
 #define PWM_TOP_PIN 16
 #define PWM_BOT_PIN 17
-#define PWM_FREQ 100000  //100 khz
+#define PWM_FREQ_HZ 100000  //100 khz
 #define PWM_DEADTIME 63  //in ticks for 504 nS deadtime
+#define SYS_CLOCK_HZ 125000000  // Default 125 MHz for RP2040
 const int SLICE_NUM = pwm_gpio_to_slice_num(PWM_TOP_PIN);
+const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;  // Correct calculation for center-aligned mode
+
 
 //pwm variables
-uint32_t levelA, levelB, topPWM;
+uint32_t levelA, levelB;
 
 
 //function
 void outputPWM(float dutyCycle) {
   // Set duty cycle with dead time
-  levelA = dutyCycle * topPWM;
-  levelB = min(levelA + PWM_DEADTIME, topPWM);
+  levelA = dutyCycle * TOP_PWM;
+  levelB = min(levelA + PWM_DEADTIME, TOP_PWM);
 
   //writes
   pwm_set_chan_level(SLICE_NUM, PWM_CHAN_A, levelA);
@@ -81,10 +84,10 @@ long lastTimeMicros = 0;
 //PI control function
 void calculatePIController(float error, float* controlEffort) {
   //max is important to deal with starting up transient
-  float dt = min(micros() - lastTimeMicros, MAX_DT);
+  float dt = min((micros() - lastTimeMicros) / 1e6f, MAX_DT);
   lastTimeMicros = micros();
 
-  errorIntegral = min(max(errorIntegral + error * dt, MAX_ISUM), -MAX_ISUM);
+  errorIntegral = max(min(errorIntegral + error * dt, MAX_ISUM), -MAX_ISUM);
 
   *controlEffort = K_P * error + K_I * errorIntegral;
 }
@@ -119,7 +122,7 @@ void readFromTypeC(float* powerLimit, float* requestedCurrent) {
   typeCWire.endTransmission(false);
 
   typeCWire.requestFrom(TYPE_C_I2C_ADDR, 2);
-  if (typeCWire.available() == 2) {
+  if (typeCWire.available() == 4) {
     powerMW = (typeCWire.read() << 8) | typeCWire.read();   //first read power limit
     currentMA = (typeCWire.read() << 8) | typeCWire.read(); //second read current requested
   } else {
@@ -143,17 +146,14 @@ void setup() {
 
   //type C i2c init stuff
   typeCWire.begin();
-  Serial.println("type c i2c initialized");
+  Serial.println("Type C I2c initialized");
 
   // Configure GPIOs for PWM
   gpio_set_function(PWM_TOP_PIN, GPIO_FUNC_PWM);
   gpio_set_function(PWM_BOT_PIN, GPIO_FUNC_PWM);
 
-  //set top pwm
-  topPWM = pwm_hw->slice[SLICE_NUM].top + 1;
-
   // Set PWM frequency
-  pwm_set_wrap(SLICE_NUM, topPWM - 1);
+  pwm_set_wrap(SLICE_NUM, TOP_PWM);
 
   // Enable center-aligned mode and invert channel B
   pwm_hw->slice[SLICE_NUM].csr |= (1 << PWM_CH0_CSR_PH_CORRECT_LSB);  // Center-aligned

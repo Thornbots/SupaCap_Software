@@ -1,5 +1,0 @@
-/home/bubba/robomasters/SupaCap_Software/build/_deps/picotool/picotool
-/home/bubba/robomasters/SupaCap_Software/build/_deps/picotool/picotoolTargets.cmake
-/home/bubba/robomasters/SupaCap_Software/build/_deps/picotool/picotoolTargets-release.cmake
-/home/bubba/robomasters/SupaCap_Software/build/_deps/picotool/picotoolConfig.cmake
-/home/bubba/robomasters/SupaCap_Software/build/_deps/picotool/picotoolConfigVersion.cmake
