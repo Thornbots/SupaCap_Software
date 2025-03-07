@@ -158,28 +158,28 @@ void setup() {
 }
 
 //main loop variables==============================================================================
-float voltage = 0, current = 0, energy = 0;  //volts, amps, Joules
-float x, y;                                  //loop values
+float bankVoltage = 0, boostedCurrent = 0, bankEnergy = 0;  //volts, amps, Joules
+float targetCurrent, dutyCycle;                                  //loop values 
 
 //main loop for real trust
 void loop() {
 
   //read from the ina219 the important values yay
-  readFromCapBank(&current, &voltage, &energy);
+  readFromCapBank(&boostedCurrent, &bankVoltage, &bankEnergy);
 
   //send current bank energy to the type C
-  dataI2C.bankEnergyJ = energy;
+  dataI2C.bankEnergyJ = bankEnergy;
 
   //calculate what needs to be supplied by the supacap
   //make sure current is reasonable. Then account for power limit
-  x = min(CAP_MAX_CURRENT, (dataI2C.reqCurrentMA / 1000.0f) - (dataI2C.powerLimitW / OUTPUT_VOLTAGE));
+  targetCurrent = min(CAP_MAX_CURRENT, (dataI2C.reqCurrentMA / 1000.0f) - (dataI2C.powerLimitW / OUTPUT_VOLTAGE));
 
   //do not output if the voltage is too low and we want to draw
-  if (voltage < CAP_MIN_VOLTAGE && x > 0) y = 0;
+  if (bankVoltage < CAP_MIN_VOLTAGE && targetCurrent > 0) dutyCycle = 0;
 
   //if we have energy in the bank we can use, or we are charging, run the controller
-  else calculatePIController(x - current, &y);
+  else calculatePIController(targetCurrent - boostedCurrent, &dutyCycle);
 
   //finally, send output to the boost converter
-  outputPWM(y);
+  outputPWM(dutyCycle);
 }
