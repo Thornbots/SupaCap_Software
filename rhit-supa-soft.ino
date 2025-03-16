@@ -8,6 +8,16 @@ This board controls the output of the capacitor bank to meet an input specificat
 Everything is divided into sections, with the individual components broken up at the top. Setup and Loop are at the bottom
 
 THIS IS UNTESTED I HAVE NO IDEA IF THIS WORKS. ALSO CHATGPT HELPED WHICH MAKES IT EVEN WORSE
+
+One cores should handle I2c and one cores hould handle PWM
+Ensure that we use all 3 current sensors. We currently have one
+Create a seperate setup and void setup1 and loop1 to have second core
+physical test to ensure tat both PWM signals are never both high
+if vbat < 10 or so, needs stop
+should double check I2C values
+I2C current sensors, current and voltage from battery, current to the robot and current to from the cap current we use is not measured.
+
+Check PWM signal generator current voltage
 */
 
 //imports ===============================================================
@@ -27,17 +37,20 @@ THIS IS UNTESTED I HAVE NO IDEA IF THIS WORKS. ALSO CHATGPT HELPED WHICH MAKES I
 #define SENSOR_SCL_PIN 18
 
 //current sensor variable
-Adafruit_INA219 ina219;
-TwoWire sensorWire{ SENSOR_SDA_PIN, SENSOR_SCL_PIN };
+Adafruit_INA219 battery_INA219;
+Adafruit_INA219 robot_INA219;
+Adafruit_INA219 cap_INA219;
+//TwoWire sensorWire{ SENSOR_SDA_PIN, SENSOR_SCL_PIN };
+// TwoWire sensorWire = TwoWire(0);
 
 //function to read all values from cap bank with minimum calls
 void readFromCapBank(float* outputCurrent, float* bankVoltage, float* bankEnergy) {
 
   //mA to A conversion.
-  float bankCurrent = ina219.getCurrent_mA() / 1000.0f;
+  float bankCurrent = cap_INA219.getCurrent_mA() / 1000.0f;
 
   //add up the voltages this could be wrong idk
-  *bankVoltage = ina219.getBusVoltage_V() + ina219.getShuntVoltage_mV() / 1000;
+  *bankVoltage = cap_INA219.getBusVoltage_V() + cap_INA219.getShuntVoltage_mV() / 1000;
 
   //gets the current after the boost converter
   //temp transform with a div by 0 check. The 0.9 is to account for boost ineffecieny
@@ -85,7 +98,7 @@ long lastTimeMicros = 0;
 //PI control function
 void calculatePIController(float error, float* controlEffort) {
   //max is important to deal with starting up transient
-  float dt = min((micros() - lastTimeMicros) / 1e6f, MAX_DT);
+  float dt = min((micros() - lastTimeMicros) / 1e6f, MAX_DT); //What is the purpose of this MAX_DT
   lastTimeMicros = micros();
 
   errorIntegral = max(min(errorIntegral + error * dt, MAX_ISUM), -MAX_ISUM);
@@ -99,7 +112,7 @@ void calculatePIController(float error, float* controlEffort) {
 #define I2C_SLAVE_ADDR 0x50  // FIND WHAT THIS ACTUALLY IS
 
 //I2c variables
-TwoWire typeCWire{ TYPE_C_SDA_PIN, TYPE_C_SCL_PIN };
+// TwoWire typeCWire = TwoWire(1);//{ TYPE_C_SDA_PIN, TYPE_C_SCL_PIN };
 
 //these store the values for the i2cdata so we can know what actually is used in I2C and what is not. 
 struct I2CData{
@@ -111,33 +124,34 @@ struct I2CData{
 //send the energy to the type C board
 void writeToTypeC() {
   //writes on the line. Since it is a 16 bit need 2 bytes
-  typeCWire.write((dataI2C.bankEnergyJ >> 8) & 0xFF);  // High byte
-  typeCWire.write(dataI2C.bankEnergyJ & 0xFF);         // Low byte
+  Wire.write((dataI2C.bankEnergyJ >> 8) & 0xFF);  // High byte
+  Wire.write(dataI2C.bankEnergyJ & 0xFF);         // Low byte
 }
 
 //read values from the type C
 void readFromTypeC(int byteCount) {
 
-  while (typeCWire.available() && (byteCount -= 4) >= 0) {
+  while (Wire.available() && (byteCount -= 4) >= 0) {
     // Handle incoming data from Type C. its 4 bytes.
-    dataI2C.powerLimitW = typeCWire.read() << 8 | typeCWire.read();    // Low byte
-    dataI2C.reqCurrentMA = typeCWire.read() << 8 | typeCWire.read();  // Low byte
+    dataI2C.powerLimitW = Wire.read() << 8 | Wire.read();    // Low byte
+    dataI2C.reqCurrentMA = Wire.read() << 8 | Wire.read();  // Low byte
   }
 }
 
-//setup function =================================================================
+//setup for PWM core =================================================================
 void setup() {
   Serial.begin(115200);
-
+  Wire1.setSCL(SENSOR_SCL_PIN);
+  Wire1.setSDA(SENSOR_SDA_PIN);
+  Wire1.begin();
   //initialize the current sensor
-  if (!ina219.begin(&sensorWire)) {
-    Serial.println("Failed to find INA219 chip");
+  if (!cap_INA219.begin(&Wire1)) {
+    Serial.println("Failed to find capacitor INA219 chip");
+  }else if (!battery_INA219.begin(&Wire1)) {
+    Serial.println("Failed to find battery INA219 chip");
+  }else if (!robot_INA219.begin(&Wire1)) {
+    Serial.println("Failed to find robot INA219 chip");
   }
-
-  //type C i2c init stuff
-  typeCWire.begin(I2C_SLAVE_ADDR);
-  typeCWire.onRequest(writeToTypeC);
-  typeCWire.onReceive(readFromTypeC);
 
   // Configure GPIOs for PWM
   gpio_set_function(PWM_TOP_PIN, GPIO_FUNC_PWM);
@@ -161,14 +175,18 @@ void setup() {
 float bankVoltage = 0, boostedCurrent = 0, bankEnergy = 0;  //volts, amps, Joules
 float targetCurrent, dutyCycle;                                  //loop values 
 
-//main loop for real trust
+//main loop for PWM Core
 void loop() {
-
   //read from the ina219 the important values yay
   readFromCapBank(&boostedCurrent, &bankVoltage, &bankEnergy);
 
+  //TODO read from  battery and confirm voltage is high enough.
+  float batteryVoltage = battery_INA219.getBusVoltage_V() + battery_INA219.getShuntVoltage_mV() / 1000;
+  if(batteryVoltage < 10){
+    Serial.println("Battery Voltage Too low < 10V \n");
+  }
   //send current bank energy to the type C
-  dataI2C.bankEnergyJ = bankEnergy;
+  //dataI2C.bankEnergyJ = bankEnergy;
 
   //calculate what needs to be supplied by the supacap
   //make sure current is reasonable. Then account for power limit
@@ -182,4 +200,42 @@ void loop() {
 
   //finally, send output to the boost converter
   outputPWM(dutyCycle);
+}
+
+//setup function for USB-C Core =================================================================
+void setup1() {
+  Serial.begin(115200);
+
+  //type C i2c init stuff
+  Wire.setSCL(TYPE_C_SCL_PIN);
+  Wire.setSDA(TYPE_C_SDA_PIN);
+  Wire.begin(I2C_SLAVE_ADDR);
+  Wire.onRequest(writeToTypeC);
+  Wire.onReceive(readFromTypeC);
+
+  //log last time to prevent transient spike
+  lastTimeMicros = micros();
+}
+
+//main loop for USB-C Core
+void loop1() {
+
+  //read from the ina219 the important values yay
+  //readFromCapBank(&boostedCurrent, &bankVoltage, &bankEnergy);
+
+  //send current bank energy to the type C
+  dataI2C.bankEnergyJ = bankEnergy;
+
+  //calculate what needs to be supplied by the supacap
+  //make sure current is reasonable. Then account for power limit
+  //targetCurrent = min(CAP_MAX_CURRENT, (dataI2C.reqCurrentMA / 1000.0f) - (dataI2C.powerLimitW / OUTPUT_VOLTAGE));
+
+  //do not output if the voltage is too low and we want to draw
+  // if (bankVoltage < CAP_MIN_VOLTAGE && targetCurrent > 0) dutyCycle = 0;
+
+  //if we have energy in the bank we can use, or we are charging, run the controller
+  // else calculatePIController(targetCurrent - boostedCurrent, &dutyCycle);
+
+  //finally, send output to the boost converter
+  // outputPWM(dutyCycle);
 }
