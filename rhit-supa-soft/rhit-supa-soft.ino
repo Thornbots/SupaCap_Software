@@ -33,15 +33,13 @@ Check PWM signal generator current voltage
 #define CAP_MAX_CURRENT 3.0f   //maximum power cap bank can output (W)
 
 //Current sesor I2c on the pico =========================================
-#define SENSOR_SDA_PIN 19
-#define SENSOR_SCL_PIN 18
+#define SENSOR_SDA_PIN 18
+#define SENSOR_SCL_PIN 19
 
 //current sensor variable
 Adafruit_INA219 battery_INA219;
 Adafruit_INA219 robot_INA219;
 Adafruit_INA219 cap_INA219;
-//TwoWire sensorWire{ SENSOR_SDA_PIN, SENSOR_SCL_PIN };
-// TwoWire sensorWire = TwoWire(0);
 
 //function to read all values from cap bank with minimum calls
 void readFromCapBank(float* outputCurrent, float* bankVoltage, float* bankEnergy) {
@@ -111,8 +109,6 @@ void calculatePIController(float error, float* controlEffort) {
 #define TYPE_C_SCL_PIN 1
 #define I2C_SLAVE_ADDR 0x50  // FIND WHAT THIS ACTUALLY IS
 
-//I2c variables
-// TwoWire typeCWire = TwoWire(1);//{ TYPE_C_SDA_PIN, TYPE_C_SCL_PIN };
 
 //these store the values for the i2cdata so we can know what actually is used in I2C and what is not. 
 struct I2CData{
