@@ -66,8 +66,8 @@ float openLoopController(float desiredCurrent, float measuredCurrent, float meas
   Serial.print(-INDUCTANCE * (di/dt));
   // Serial.print(" ");
   // Serial.print(measuredVoltage);
-  // Serial.print(" ");
-  // Serial.print(desiredCurrent);
+  Serial.print(" ");
+  Serial.print(measuredCurrent);
   Serial.print(" ");
   Serial.print(dt);
   Serial.print(" ");
@@ -149,5 +149,5 @@ void loop() {
 
   //finally, send output to the boost converter
   outputPWM(dutyCycle);
-  delay(50);
+  delay(10);
 }
