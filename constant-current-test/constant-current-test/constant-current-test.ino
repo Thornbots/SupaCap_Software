@@ -22,7 +22,7 @@ int dutyCycle;
 
 
 
-#define TARGET_CURRENT -1000
+#define TARGET_CURRENT 1000
 #define STOP_VOLTAGE 12
 
 
@@ -57,6 +57,10 @@ void calculatePIController(float error, float* controlEffort) {
   errorIntegral = max(min(errorIntegral + error * dt, MAX_ISUM), -MAX_ISUM);
 
   *controlEffort = max(min(K_P * error + K_I * errorIntegral, 0.5), -0.5);
+
+  Serial.print(error);
+  Serial.print(" ");
+  Serial.println(*controlEffort);
 }
 
 
@@ -112,12 +116,12 @@ void loop() {
   float targetCurrent = TARGET_CURRENT;
 
   busvoltage = ina219_CAPBANK.getBusVoltage_V();
-  mycurrent = ina219_CAPBANK.getShuntVoltage_mV()/0.01;
+  mycurrent = -ina219_CAPBANK.getShuntVoltage_mV()/0.01;
 
 
   
-  Serial.print("Bus Voltage:   "); Serial.print(busvoltage); Serial.println(" V");
-  Serial.print("my current:       "); Serial.print(mycurrent); Serial.println(" mA");
+ // Serial.print("Bus Voltage:   "); Serial.print(busvoltage); Serial.println(" V");
+ // Serial.print("my current:       "); Serial.print(mycurrent); Serial.println(" mA");
   
 
   if(busvoltage >= STOP_VOLTAGE){
@@ -131,7 +135,7 @@ void loop() {
 
 
   calculatePIController(targetCurrent - mycurrent, &dutyCycle);
-  Serial.print("Duty Cycle:       "); Serial.println(abs(dutyCycle));
+  //Serial.print("Duty Cycle:       "); Serial.println(abs(dutyCycle));
 
   //finally, send output to the boost converter
   outputPWM(abs(dutyCycle));
