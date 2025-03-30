@@ -39,18 +39,33 @@ void outputPWM(float dutyCycle) {
 #define MAX_DT 0.1f
 
 //pi controller variable
-float errorIntegral = 0;
+// float errorIntegral = 0;
 long lastTimeMicros = 0;
 
-//PI control function
-void calculatePIController(float error, float* controlEffort) {
-  //max is important to deal with starting up transient
-  float dt = min((micros() - lastTimeMicros) / 1e6f, MAX_DT); //What is the purpose of this MAX_DT
+// //PI control function
+// void calculatePIController(float error, float* controlEffort) {
+//   //max is important to deal with starting up transient
+//   float dt = min((micros() - lastTimeMicros) / 1e6f, MAX_DT); //What is the purpose of this MAX_DT
+//   lastTimeMicros = micros();
+
+//   errorIntegral = max(min(errorIntegral + error * dt, MAX_ISUM), -MAX_ISUM);
+
+//   *controlEffort = max(min(K_P * error + K_I * errorIntegral, 0.5), -0.5);
+// }
+
+//finds duty cycle to achieve a current over the inductor
+float INDUCTANCE = 10*1e-6;
+float openLoopController(float desiredCurrent, float measuredCurrent, float measuredVoltage){
+
+  float dt = (micros() - lastTimeMicros)/1000000.0f;
   lastTimeMicros = micros();
 
-  errorIntegral = max(min(errorIntegral + error * dt, MAX_ISUM), -MAX_ISUM);
+  float di = desiredCurrent - measuredCurrent;
+  lastCurrent = desiredCurrent;
+ 
+  float outputVoltage = INDUCTANCE * (di / dt) + measuredVoltage;
+  return outputVoltage / 24; //convert to duty cycle
 
-  *controlEffort = max(min(K_P * error + K_I * errorIntegral, 0.5), -0.5);
 }
 //PI Controller ============================================
 
@@ -102,8 +117,10 @@ void loop() {
   float dutyCycle;
   float targetCurrent = TARGET_CURRENT;
 
-  busvoltage = ina219_CAPBANK.getBusVoltage_V();
-  mycurrent = ina219_CAPBANK.getShuntVoltage_mV()/0.01;
+  // busvoltage = ina219_CAPBANK.getBusVoltage_V();
+  // mycurrent = ina219_CAPBANK.getShuntVoltage_mV()/0.01;
+  busvoltage = 5.0;
+  mycurrent = 0.5;
 
   Serial.print("Bus Voltage:   "); Serial.print(busvoltage); Serial.println(" V");
   Serial.print("my current:       "); Serial.print(mycurrent); Serial.println(" mA");
