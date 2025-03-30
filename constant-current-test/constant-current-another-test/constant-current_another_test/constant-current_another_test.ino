@@ -19,7 +19,7 @@ const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;  // Correct calcu
 uint32_t levelA, levelB;
 int dutyCycle;
 
-#define TARGET_CURRENT -1000
+#define TARGET_CURRENT -0.1f
 #define STOP_VOLTAGE 12
 
 void outputPWM(float dutyCycle) {
@@ -54,16 +54,26 @@ long lastTimeMicros = 0;
 // }
 
 //finds duty cycle to achieve a current over the inductor
-float INDUCTANCE = 10*1e-6;
+float INDUCTANCE = 10*10e-5;
 float openLoopController(float desiredCurrent, float measuredCurrent, float measuredVoltage){
 
   float dt = (micros() - lastTimeMicros)/1000000.0f;
   lastTimeMicros = micros();
 
   float di = desiredCurrent - measuredCurrent;
-  lastCurrent = desiredCurrent;
+  // lastCurrent = desiredCurrent;
+
+  Serial.print(-INDUCTANCE * (di/dt));
+  // Serial.print(" ");
+  // Serial.print(measuredVoltage);
+  // Serial.print(" ");
+  // Serial.print(desiredCurrent);
+  Serial.print(" ");
+  Serial.print(dt);
+  Serial.print(" ");
  
-  float outputVoltage = INDUCTANCE * (di / dt) + measuredVoltage;
+  float outputVoltage = - INDUCTANCE * (di / dt) + measuredVoltage;
+  Serial.println(outputVoltage);
   return outputVoltage / 24; //convert to duty cycle
 
 }
@@ -117,13 +127,13 @@ void loop() {
   float dutyCycle;
   float targetCurrent = TARGET_CURRENT;
 
-  // busvoltage = ina219_CAPBANK.getBusVoltage_V();
-  // mycurrent = ina219_CAPBANK.getShuntVoltage_mV()/0.01;
-  busvoltage = 5.0;
-  mycurrent = 0.5;
+  busvoltage = ina219_CAPBANK.getBusVoltage_V();
+  mycurrent = ina219_CAPBANK.getShuntVoltage_mV()/10.0;
+  // busvoltage = 5.0;
+  // mycurrent = 0.5;
 
-  Serial.print("Bus Voltage:   "); Serial.print(busvoltage); Serial.println(" V");
-  Serial.print("my current:       "); Serial.print(mycurrent); Serial.println(" mA");
+  // Serial.print("Bus Voltage:   "); Serial.print(busvoltage); Serial.println(" V");
+  // Serial.print("my current:       "); Serial.print(mycurrent); Serial.println(" A");
   
   if(busvoltage >= STOP_VOLTAGE){
     while(1){
@@ -134,10 +144,10 @@ void loop() {
     }
   }
 
-  calculatePIController(targetCurrent - mycurrent, &dutyCycle);
-  Serial.print("Duty Cycle:       "); Serial.println(abs(dutyCycle));
+  dutyCycle = openLoopController(TARGET_CURRENT, mycurrent, busvoltage);
+  // Serial.print("Duty Cycle:       "); Serial.println(dutyCycle);
 
   //finally, send output to the boost converter
-  outputPWM(abs(dutyCycle));
-  delay(150);
+  outputPWM(dutyCycle);
+  delay(50);
 }
