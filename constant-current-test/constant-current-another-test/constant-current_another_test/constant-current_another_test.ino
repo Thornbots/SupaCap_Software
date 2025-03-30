@@ -53,27 +53,56 @@ long lastTimeMicros = 0;
 //   *controlEffort = max(min(K_P * error + K_I * errorIntegral, 0.5), -0.5);
 // }
 
+constexpr float KP =0.1f, KI = 0.1f;
+
+float errorIntegral = 0;
+float calculatePController(float desiredCurrent, float measuredCurrent, float measuredVoltage){
+  float dt = min((micros() - lastTimeMicros) / 10e6f, MAX_DT); //What is the purpose of this MAX_DT
+  lastTimeMicros = micros();
+  float error = - (desiredCurrent - measuredCurrent); //find error
+  errorIntegral += (error * dt);
+
+  Serial.print(measuredVoltage);
+  Serial.print(" ");
+  Serial.print(measuredCurrent);
+  Serial.print(" ");
+  Serial.print(error);
+  Serial.print(" ");
+  float targetVoltage = measuredVoltage + KP * error + KI * errorIntegral; //find target voltage
+  targetVoltage = max(min(targetVoltage, STOP_VOLTAGE), 0); // keep it reasonable
+  float dutyCycle = targetVoltage / 24;
+  Serial.println(dutyCycle);
+  return dutyCycle; //convert to duty cycle
+}
 //finds duty cycle to achieve a current over the inductor
-float INDUCTANCE = 10*10e-5;
+float INDUCTANCE = 10*10e-6; 
+float CAPACITANCE = 100.0/6;
+float voltageIntegral = -1;
+float lastCurrent = 0;
 float openLoopController(float desiredCurrent, float measuredCurrent, float measuredVoltage){
+  if(voltageIntegral == -1){
+    voltageIntegral = measuredVoltage;
+  }
 
   float dt = (micros() - lastTimeMicros)/1000000.0f;
   lastTimeMicros = micros();
 
-  float di = desiredCurrent - measuredCurrent;
-  // lastCurrent = desiredCurrent;
+  float di = measuredCurrent - lastCurrent;
+  lastCurrent = measuredCurrent;
 
-  Serial.print(-INDUCTANCE * (di/dt));
-  // Serial.print(" ");
-  // Serial.print(measuredVoltage);
+  voltageIntegral -= (desiredCurrent * dt/CAPACITANCE);
+  voltageIntegral = max(min(voltageIntegral, STOP_VOLTAGE), 0);
+  Serial.print(voltageIntegral);
   Serial.print(" ");
-  Serial.print(measuredCurrent);
+  Serial.print(desiredCurrent*1000);
   Serial.print(" ");
-  Serial.print(dt);
+  Serial.print(measuredCurrent*1000);
+  Serial.print(" ");
+  Serial.print(- INDUCTANCE * (di/dt));
   Serial.print(" ");
  
-  float outputVoltage = - INDUCTANCE * (di / dt) + measuredVoltage;
-  Serial.println(outputVoltage);
+  float outputVoltage = - INDUCTANCE * (di / dt) + voltageIntegral;
+  Serial.println(outputVoltage / 24);
   return outputVoltage / 24; //convert to duty cycle
 
 }
@@ -120,12 +149,12 @@ void setup() {
   dutyCycle = 0;
 
 }
-
+float targetCurrent = TARGET_CURRENT;
 void loop() {
   float busvoltage = 0;
   float mycurrent = 0;
   float dutyCycle;
-  float targetCurrent = TARGET_CURRENT;
+
 
   busvoltage = ina219_CAPBANK.getBusVoltage_V();
   mycurrent = ina219_CAPBANK.getShuntVoltage_mV()/10.0;
@@ -144,10 +173,11 @@ void loop() {
     }
   }
 
-  dutyCycle = openLoopController(TARGET_CURRENT, mycurrent, busvoltage);
+  dutyCycle = calculatePController(targetCurrent, mycurrent, busvoltage);
   // Serial.print("Duty Cycle:       "); Serial.println(dutyCycle);
 
   //finally, send output to the boost converter
   outputPWM(dutyCycle);
+
   delay(10);
 }
