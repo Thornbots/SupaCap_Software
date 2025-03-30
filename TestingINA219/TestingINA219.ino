@@ -30,7 +30,11 @@ void setup(){
     while (1) { delay(10); }
   }
 
-  //TODO: add configuration for each chip
+  //TODO: add configuration for each chip (I think we will need to write this ourselves cause the library is shit)
+  // if(!ina219_MOTORS.setMaxCurrentShunt(10, 0.01)){
+  //   Serial.println("Failed Calibration on Motor INA");
+  //   while (1) { delay(10); }
+  // }
 
   Serial.println("Measuring voltage and current with ina219_PMM ...");
 }
@@ -43,8 +47,8 @@ void loop(){
   // float power_mW = 0;
 
   // shuntvoltage = ina219_PMM.getShuntVoltage_mV();
-  busvoltage = ina219_MOTORS.getBusVoltage_V();
-  current_mA = ina219_MOTORS.getCurrent_mA();
+  busvoltage = ina219_CAPBANK.getBusVoltage_V();
+  current_mA = ina219_CAPBANK.getCurrent_mA();
   // power_mW = ina219_PMM.getPower_mW();
   // loadvoltage = busvoltage + (shuntvoltage / 1000);
   

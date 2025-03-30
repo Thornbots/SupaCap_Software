@@ -11,6 +11,15 @@ const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;  // Correct calcu
 uint32_t levelA, levelB;
 int dutyCycle;
 
+
+#include <Wire.h>
+#include <Adafruit_INA219.h>
+
+TwoWire CurrentBus(18, 19);
+Adafruit_INA219 ina219_CAPBANK(0x40);
+Adafruit_INA219 ina219_PMM(0x41);
+Adafruit_INA219 ina219_MOTORS(0x44);
+
 void outputPWM(float dutyCycle) {
   // Set duty cycle with dead time
   levelA = dutyCycle * TOP_PWM;
@@ -24,6 +33,25 @@ void outputPWM(float dutyCycle) {
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
+  while (!Serial) {
+      // will pause until serial console opens DO NOT INCLUDE ON FINAL CODE 
+      delay(1);
+  }
+
+  if (! ina219_CAPBANK.begin(&CurrentBus)) {
+    Serial.println("Failed to find Cap Bank chip");
+    while (1) { delay(10); }
+  }
+
+  if (! ina219_PMM.begin(&CurrentBus)) {
+    Serial.println("Failed to find PMM chip");
+    while (1) { delay(10); }
+  }
+
+  if (! ina219_MOTORS.begin(&CurrentBus)) {
+    Serial.println("Failed to find Motor Output chip");
+    while (1) { delay(10); }
+  }
 
   // Configure GPIOs for PWM
   gpio_set_function(PWM_TOP_PIN, GPIO_FUNC_PWM);
@@ -44,9 +72,18 @@ void setup() {
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  dutyCycle = (dutyCycle + 1) % 10000000;
-  float dutyCycle_float = 1.0f*dutyCycle/10000000;
-  // float dutyCycle_float  = 0.5;
+
+  float busvoltage = 0;
+  float current_mA = 0;
+
+  busvoltage = ina219_CAPBANK.getBusVoltage_V();
+  current_mA = ina219_CAPBANK.getCurrent_mA();
+  Serial.print("Bus Voltage:   "); Serial.print(busvoltage); Serial.println(" V");
+  Serial.print("Current:       "); Serial.print(current_mA); Serial.println(" mA");
+
+
+
+  float dutyCycle_float  = 0.4;
   outputPWM(dutyCycle_float);
+  delay(150);
 }
