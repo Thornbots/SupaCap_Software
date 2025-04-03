@@ -17,9 +17,7 @@ const int SLICE_NUM = pwm_gpio_to_slice_num(PWM_TOP_PIN);
 const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;  // Correct calculation for center-aligned mode
 
 uint32_t levelA, levelB;
-int dutyCycle;
 
-#define TARGET_CURRENT -0.1f
 #define STOP_VOLTAGE 12
 
 void outputPWM(float dutyCycle) {
@@ -47,17 +45,17 @@ float voltageToDutyCycle(float targetCurrent, float targetVoltage) {
     // } else {  //we are letting the cap hold voltage so we do nothing
     //   //todo cut off both ports
   }
-  return dutyCycle;
+  return max(0, dutyCycle);
 }
 
 //P controller + voltage and constant feedforward
-#define K_P -0.001      //this is negative because more negative current is higher voltage, and more positive current is lower voltage
+#define K_P 0.01      //this is negative because more negative current is higher voltage, and more positive current is lower voltage
 #define K_F 1           //scale measured voltage
-#define K_C -0.2        //add to measured voltage
+#define K_C 0//-0.15        //add to measured voltage
 #define MAX_EFFORT 0.1  //V
 
 float currentToVoltage(float measuredCurrent, float targetCurrent, float measuredVoltage) {
-  float controlEffort = K_P * (targetCurrent - measuredCurrent);  //p controller
+  float controlEffort = K_P * (- targetCurrent + measuredCurrent);  //p controller
 
   controlEffort = min(max(-MAX_EFFORT, controlEffort), MAX_EFFORT);  // control effort limiter
 
@@ -77,16 +75,26 @@ void configINA219(uint8_t addr) {
   // Mode: 0b111 (Shunt and Bus, Continuous)
 
   config = INA219_CONFIG_BVOLTAGERANGE_32V |                                           // 32V Bus Voltage Range
-           INA219_CONFIG_GAIN_1_40MV |                                                 // Gain of 1 (40mV shunt range)
+           INA219_CONFIG_GAIN_8_320MV |                                                 // Gain of 1 (40mV shunt range)
            INA219_CONFIG_SADCRES_12BIT_128S_69MS |                                     // Shunt ADC: 12-bit, 128 samples
            INA219_CONFIG_BADCRES_12BIT_128S_69MS |                                     // Bus ADC: 12-bit, 128 samples
            INA219_CONFIG_MODE_SVOLT_CONTINUOUS | INA219_CONFIG_MODE_BVOLT_CONTINUOUS;  // Mode: Shunt and Bus, Continuous
+  Serial.println("made config");
 
-  Wire.beginTransmission(addr);
-  Wire.write(0x00);
-  Wire.write(config >> 8);    // High byte
-  Wire.write(config & 0xFF);  // Low byte
-  Wire.endTransmission();
+  CurrentBus.beginTransmission(addr);
+  Serial.print(1);
+  CurrentBus.write(0x00);
+    Serial.print(2);
+
+  CurrentBus.write(config >> 8);    // High byte
+    Serial.print(3);
+
+  CurrentBus.write(config & 0xFF);  // Low byte
+    Serial.print(4);
+
+  // CurrentBus.endTransmission();
+    Serial.print(5);
+
 
   Serial.println("INA219 configured with 128 sample averaging.");
 }
@@ -98,12 +106,15 @@ void setup() {
     // will pause until serial console opens DO NOT INCLUDE ON FINAL CODE
     delay(1);
   }
+  Serial.println("beginning");
 
+  // configINA219(0x40);
+
+  Serial.println("ee");
   if (!ina219_CAPBANK.begin(&CurrentBus)) {
     Serial.println("Failed to find Cap Bank chip");
     while (1) { delay(10); }
   }
-  configINA219(0x40);
 
   if (!ina219_PMM.begin(&CurrentBus)) {
     Serial.println("Failed to find PMM chip");
@@ -147,7 +158,7 @@ void loop() {
   //   Serial.read();
   // }
 
-  measuredCurrent = ina219_CAPBANK.getCurrent_mA() / 1000.0f;
+  measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV()/0.01;
   measuredVoltage = ina219_CAPBANK.getBusVoltage_V();
 
   if (measuredVoltage >= STOP_VOLTAGE) {
@@ -164,7 +175,7 @@ void loop() {
 
   dutyCycle = voltageToDutyCycle(targetCurrent, targetVoltage);
 
-  char buffer[100];  // Allocate enough space for formatted output
+  char buffer[120];  // Allocate enough space for formatted output
   snprintf(buffer, sizeof(buffer), "Target Current: %.3f, Measured Current: %.3f, Target Voltage: %.3f, Measured Voltage: %.3f, Duty Cycle: %.3f",
            targetCurrent, measuredCurrent, targetVoltage, measuredVoltage, dutyCycle);
 
@@ -172,5 +183,5 @@ void loop() {
   //finally, send output to the boost converter
   outputPWM(dutyCycle);
 
-  delay(100);
+  delay(10);
 }
