@@ -18,7 +18,7 @@ const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;  // Correct calcu
 
 uint32_t levelA, levelB;
 
-#define STOP_VOLTAGE 12
+#define STOP_VOLTAGE 11
 
 void outputPWM(float dutyCycle) {
   // Set duty cycle with dead time
@@ -49,10 +49,10 @@ float voltageToDutyCycle(float targetCurrent, float targetVoltage) {
 }
 
 //P controller + voltage and constant feedforward
-#define K_P 0.5      //this is negative because more negative current is higher voltage, and more positive current is lower voltage
+#define K_P 0.6      //this is negative because more negative current is higher voltage, and more positive current is lower voltage
 #define K_F 1           //scale measured voltage
 #define K_C -0.15        //add to measured voltage
-#define MAX_EFFORT 0.1  //V
+#define MAX_EFFORT 0.2  //V
 
 float currentToVoltage(float measuredCurrent, float targetCurrent, float measuredVoltage) {
   float controlEffort = K_P * (- targetCurrent + measuredCurrent);  //p controller
@@ -66,34 +66,22 @@ float currentToVoltage(float measuredCurrent, float targetCurrent, float measure
 void configINA219(uint8_t addr) {
   uint16_t config = 0;
 
-  // Configuration settings:
-  // Reset: 0b0 (No reset)
-  // Bus Voltage Range: 0b1 (32V)
-  // PGA: 0b00 (Gain of 1, 40mV range)
-  // Bus ADC Resolution: 0b1111 (12-bit, 128 samples)
-  // Shunt ADC Resolution: 0b1111 (12-bit, 128 samples)
-  // Mode: 0b111 (Shunt and Bus, Continuous)
 
-  config = INA219_CONFIG_BVOLTAGERANGE_32V |                                           // 32V Bus Voltage Range
-           INA219_CONFIG_GAIN_8_320MV |                                                 // Gain of 1 (40mV shunt range)
-           INA219_CONFIG_SADCRES_12BIT_128S_69MS |                                     // Shunt ADC: 12-bit, 128 samples
-           INA219_CONFIG_BADCRES_12BIT_128S_69MS |                                     // Bus ADC: 12-bit, 128 samples
-           INA219_CONFIG_MODE_SVOLT_CONTINUOUS | INA219_CONFIG_MODE_BVOLT_CONTINUOUS;  // Mode: Shunt and Bus, Continuous
-  Serial.println("made config");
+    uint16_t configValue = 
+        INA219_CONFIG_BVOLTAGERANGE_32V |  // Set Bus Voltage Range to 32V
+        INA219_CONFIG_GAIN_8_320MV |      // Set Gain to 8 (320mV range)
+        INA219_CONFIG_BADCRES_12BIT |     // Set Bus ADC Resolution to 12-bit
+        INA219_CONFIG_SADCRES_12BIT_128S_69MS | // Set Shunt ADC Resolution to 128x 12-bit samples
+        INA219_CONFIG_MODE_SANDBVOLT_CONTINUOUS; // Continuous mode
 
-  CurrentBus.beginTransmission(addr);
-  Serial.print(1);
-  CurrentBus.write(0x00);
-    Serial.print(2);
+    // Write to INA219's configuration register
+    CurrentBus.beginTransmission(addr); //capbank
+    CurrentBus.write(INA219_REG_CONFIG); // Point to Configuration Register
+    CurrentBus.write(configValue >> 8);  // Send high byte
+    CurrentBus.write(configValue & 0xFF); // Send low byte
+    CurrentBus.endTransmission();
 
-  CurrentBus.write(config >> 8);    // High byte
-    Serial.print(3);
 
-  CurrentBus.write(config & 0xFF);  // Low byte
-    Serial.print(4);
-
-  CurrentBus.endTransmission();
-    Serial.print(5);
 
 
   Serial.println("INA219 configured with 128 sample averaging.");
