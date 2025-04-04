@@ -49,9 +49,9 @@ float voltageToDutyCycle(float targetCurrent, float targetVoltage) {
 }
 
 //P controller + voltage and constant feedforward
-#define K_P 0.01      //this is negative because more negative current is higher voltage, and more positive current is lower voltage
+#define K_P 0.5      //this is negative because more negative current is higher voltage, and more positive current is lower voltage
 #define K_F 1           //scale measured voltage
-#define K_C 0//-0.15        //add to measured voltage
+#define K_C -0.15        //add to measured voltage
 #define MAX_EFFORT 0.1  //V
 
 float currentToVoltage(float measuredCurrent, float targetCurrent, float measuredVoltage) {
@@ -59,7 +59,7 @@ float currentToVoltage(float measuredCurrent, float targetCurrent, float measure
 
   controlEffort = min(max(-MAX_EFFORT, controlEffort), MAX_EFFORT);  // control effort limiter
 
-  return controlEffort + measuredVoltage * K_F + K_C;  //add in open loop terms to get voltage target
+  return controlEffort + max(0, K_F * measuredVoltage + K_C);  //add in open loop terms to get voltage target
 }
 
 
@@ -92,7 +92,7 @@ void configINA219(uint8_t addr) {
   CurrentBus.write(config & 0xFF);  // Low byte
     Serial.print(4);
 
-  // CurrentBus.endTransmission();
+  CurrentBus.endTransmission();
     Serial.print(5);
 
 
@@ -111,19 +111,19 @@ void setup() {
   // configINA219(0x40);
 
   Serial.println("ee");
-  if (!ina219_CAPBANK.begin(&CurrentBus)) {
+  while(!ina219_CAPBANK.begin(&CurrentBus)) {
     Serial.println("Failed to find Cap Bank chip");
-    while (1) { delay(10); }
+    delay(1000);
   }
 
-  if (!ina219_PMM.begin(&CurrentBus)) {
+  while (!ina219_PMM.begin(&CurrentBus)) {
     Serial.println("Failed to find PMM chip");
-    while (1) { delay(10); }
+    delay(1000);
   }
 
-  if (!ina219_MOTORS.begin(&CurrentBus)) {
+  while (!ina219_MOTORS.begin(&CurrentBus)) {
     Serial.println("Failed to find Motor Output chip");
-    while (1) { delay(10); }
+    delay(1000);
   }
 
 
@@ -144,7 +144,7 @@ void setup() {
 
 
 void loop() {
-  float measuredVoltage, measuredCurrent, dutyCycle, targetCurrent = -0.1, targetVoltage;
+  float measuredVoltage, measuredCurrent, dutyCycle, targetCurrent = -0.5, targetVoltage;
 
   // if(Serial.available() > 0){
   //   String input = Serial.readStringUntil('\n');
@@ -157,8 +157,7 @@ void loop() {
 
   //   Serial.read();
   // }
-
-  measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV()/0.01;
+  measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV()/10;
   measuredVoltage = ina219_CAPBANK.getBusVoltage_V();
 
   if (measuredVoltage >= STOP_VOLTAGE) {
@@ -176,8 +175,8 @@ void loop() {
   dutyCycle = voltageToDutyCycle(targetCurrent, targetVoltage);
 
   char buffer[120];  // Allocate enough space for formatted output
-  snprintf(buffer, sizeof(buffer), "Target Current: %.3f, Measured Current: %.3f, Target Voltage: %.3f, Measured Voltage: %.3f, Duty Cycle: %.3f",
-           targetCurrent, measuredCurrent, targetVoltage, measuredVoltage, dutyCycle);
+  snprintf(buffer, sizeof(buffer), "Target Voltage: %.3f, Measured Voltage: %.3f, Target Current: %.3f, Measured Current: %.3f, Duty Cycle: %.3f",
+           targetVoltage, measuredVoltage, targetCurrent, measuredCurrent, dutyCycle);
 
   Serial.println(buffer);
   //finally, send output to the boost converter
