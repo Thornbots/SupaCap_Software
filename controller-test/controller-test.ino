@@ -39,23 +39,35 @@ void outputPWM(float dutyCycle) {
 float voltageToDutyCycle(float targetCurrent, float targetVoltage) {
   float dutyCycle;
   if (targetCurrent > CURRENT_DEADZONE) {                            //we are discharging the cap (boost)
-    dutyCycle = min(1 - 1 / targetVoltage, MAX_BOOST_DUTY);          //equation with limit
+    dutyCycle = min(1 - (1 / targetVoltage), MAX_BOOST_DUTY);          //equation with limit
   } else {                                                           //} if(targetCurrent <= -CURRENT_DEADZONE){ //we are charging the cap (buck)
     dutyCycle = min(targetVoltage / SUPPLY_VOLTAGE, MAX_BUCK_DUTY);  //equatio with limit
     // } else {  //we are letting the cap hold voltage so we do nothing
     //   //todo cut off both ports
   }
-  return max(0, dutyCycle);
+  return max(0.001, dutyCycle); //dont allow 0 duty cycle 
 }
 
 //P controller + voltage and constant feedforward
 #define K_P 0.6      //this is negative because more negative current is higher voltage, and more positive current is lower voltage
+#define K_I 0.08
 #define K_F 1           //scale measured voltage
-#define K_C -0.15        //add to measured voltage
+#define K_C -0.1        //add to measured voltage
 #define MAX_EFFORT 0.2  //V
+#define BUFFER_LENGTH 30
+
+float errorBuffer[BUFFER_LENGTH] = {0};  // buffer to store past errors
+int bufferIndex = 0;
+float errorSum = 0;
 
 float currentToVoltage(float measuredCurrent, float targetCurrent, float measuredVoltage) {
-  float controlEffort = K_P * (- targetCurrent + measuredCurrent);  //p controller
+
+  errorSum -= errorBuffer[bufferIndex];      // remove the oldest error
+  errorBuffer[bufferIndex] = - targetCurrent + measuredCurrent;          // add the new error
+  errorSum += - targetCurrent + measuredCurrent;                         // update the sum
+  bufferIndex = (bufferIndex + 1) % BUFFER_LENGTH;
+
+  float controlEffort = K_P * (- targetCurrent + measuredCurrent) + K_I *(errorSum/BUFFER_LENGTH);  //pi controller
 
   controlEffort = min(max(-MAX_EFFORT, controlEffort), MAX_EFFORT);  // control effort limiter
 
@@ -103,16 +115,19 @@ void setup() {
     Serial.println("Failed to find Cap Bank chip");
     delay(1000);
   }
+  configINA219(0x40);
 
   while (!ina219_PMM.begin(&CurrentBus)) {
     Serial.println("Failed to find PMM chip");
     delay(1000);
   }
+  configINA219(0x41);
 
   while (!ina219_MOTORS.begin(&CurrentBus)) {
     Serial.println("Failed to find Motor Output chip");
     delay(1000);
   }
+  configINA219(0x44);
 
 
   // Configure GPIOs for PWM
@@ -132,19 +147,8 @@ void setup() {
 
 
 void loop() {
-  float measuredVoltage, measuredCurrent, dutyCycle, targetCurrent = -0.5, targetVoltage;
+  float measuredVoltage, measuredCurrent, dutyCycle, targetCurrent = -0.25, targetVoltage;
 
-  // if(Serial.available() > 0){
-  //   String input = Serial.readStringUntil('\n');
-
-  //   input.trim();
-
-  //   if(input.length() > 0){
-  //     targetCurrent = min(max(input.toInt()/1000.0f, -4), 4);
-  //   }
-
-  //   Serial.read();
-  // }
   measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV()/10;
   measuredVoltage = ina219_CAPBANK.getBusVoltage_V();
 
@@ -163,7 +167,7 @@ void loop() {
   dutyCycle = voltageToDutyCycle(targetCurrent, targetVoltage);
 
   char buffer[120];  // Allocate enough space for formatted output
-  snprintf(buffer, sizeof(buffer), "Target Voltage: %.3f, Measured Voltage: %.3f, Target Current: %.3f, Measured Current: %.3f, Duty Cycle: %.3f",
+  snprintf(buffer, sizeof(buffer), "Target Voltage:%.3f,Measured Voltage:%.3f,TargetCurrent:%.3f,MeasuredCurrent:%.3f,DutyCycle:%.3f",
            targetVoltage, measuredVoltage, targetCurrent, measuredCurrent, dutyCycle);
 
   Serial.println(buffer);
