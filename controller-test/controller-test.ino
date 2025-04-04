@@ -49,25 +49,25 @@ float voltageToDutyCycle(float targetCurrent, float targetVoltage) {
 }
 
 //P controller + voltage and constant feedforward
-#define K_P 0.6      //this is negative because more negative current is higher voltage, and more positive current is lower voltage
-#define K_I 0.08
-#define K_F 1           //scale measured voltage
-#define K_C -0.1        //add to measured voltage
+#define K_P 0.05      //this is negative because more negative current is higher voltage, and more positive current is lower voltage
+#define K_I 0.0
+#define K_F 1.0           //scale measured voltage
+#define K_C -0.15        //add to measured voltage
 #define MAX_EFFORT 0.2  //V
-#define BUFFER_LENGTH 30
+// #define BUFFER_LENGTH 10
 
-float errorBuffer[BUFFER_LENGTH] = {0};  // buffer to store past errors
-int bufferIndex = 0;
-float errorSum = 0;
+// float errorBuffer[BUFFER_LENGTH] = {0};  // buffer to store past errors
+// int bufferIndex = 0;
+// float errorSum = 0;
 
 float currentToVoltage(float measuredCurrent, float targetCurrent, float measuredVoltage) {
 
-  errorSum -= errorBuffer[bufferIndex];      // remove the oldest error
-  errorBuffer[bufferIndex] = - targetCurrent + measuredCurrent;          // add the new error
-  errorSum += - targetCurrent + measuredCurrent;                         // update the sum
-  bufferIndex = (bufferIndex + 1) % BUFFER_LENGTH;
+  // errorSum -= errorBuffer[bufferIndex];      // remove the oldest error
+  // errorBuffer[bufferIndex] = - targetCurrent + measuredCurrent;          // add the new error
+  // errorSum += - targetCurrent + measuredCurrent;                         // update the sum
+  // bufferIndex = (bufferIndex + 1) % BUFFER_LENGTH;
 
-  float controlEffort = K_P * (- targetCurrent + measuredCurrent) + K_I *(errorSum/BUFFER_LENGTH);  //pi controller
+  float controlEffort = K_P * (- targetCurrent + measuredCurrent); // + K_I *(errorSum/BUFFER_LENGTH);  //pi controller
 
   controlEffort = min(max(-MAX_EFFORT, controlEffort), MAX_EFFORT);  // control effort limiter
 
@@ -99,6 +99,7 @@ void configINA219(uint8_t addr) {
   Serial.println("INA219 configured with 128 sample averaging.");
 }
 
+float voltageArray[10], currentArray[10];
 
 void setup() {
   Serial.begin(115200);
@@ -143,14 +144,31 @@ void setup() {
 
   //start pwm
   pwm_set_enabled(SLICE_NUM, true);
-}
 
+  for(int i = 0; i < 10; i++){
+    voltageArray[i] = ina219_CAPBANK.getBusVoltage_V();
+  }
+}
 
 void loop() {
   float measuredVoltage, measuredCurrent, dutyCycle, targetCurrent = -0.25, targetVoltage;
+  
+  for(int i = 0; i < 9; i++){
+    voltageArray[i] = voltageArray[i+1];
+    measuredVoltage += voltageArray[i];
+  }
+  voltageArray[9] = ina219_CAPBANK.getBusVoltage_V();
+  measuredVoltage = (measuredVoltage + voltageArray[9])/10.0f;
 
-  measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV()/10;
-  measuredVoltage = ina219_CAPBANK.getBusVoltage_V();
+
+  for(int i = 0; i < 9; i++){
+    currentArray[i] = currentArray[i+1];
+    measuredCurrent += currentArray[i];
+  }
+  currentArray[9] = ina219_CAPBANK.getShuntVoltage_mV()/10.0f;
+  measuredCurrent = (measuredCurrent + currentArray[9])/10.0f;
+
+
 
   if (measuredVoltage >= STOP_VOLTAGE) {
     while (1) {
@@ -167,7 +185,7 @@ void loop() {
   dutyCycle = voltageToDutyCycle(targetCurrent, targetVoltage);
 
   char buffer[120];  // Allocate enough space for formatted output
-  snprintf(buffer, sizeof(buffer), "Target Voltage:%.3f,Measured Voltage:%.3f,TargetCurrent:%.3f,MeasuredCurrent:%.3f,DutyCycle:%.3f",
+  snprintf(buffer, sizeof(buffer), "TargetVoltage:%.3f,MeasuredVoltage:%.3f,TargetCurrent:%.3f,MeasuredCurrent:%.3f,DutyCycle:%.3f",
            targetVoltage, measuredVoltage, targetCurrent, measuredCurrent, dutyCycle);
 
   Serial.println(buffer);
