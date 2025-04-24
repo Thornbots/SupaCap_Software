@@ -38,6 +38,7 @@ void stopPWM(){
   digitalWrite(16, LOW);
   pinMode(17, OUTPUT);
   digitalWrite(17, LOW);
+  }
 }
 
 
@@ -48,20 +49,20 @@ void setup() {
       delay(1);
   }
 
-  if (! ina219_CAPBANK.begin(&CurrentBus)) {
-    Serial.println("Failed to find Cap Bank chip");
-    while (1) { delay(10); }
-  }
+  // if (! ina219_CAPBANK.begin(&CurrentBus)) {
+  //   Serial.println("Failed to find Cap Bank chip");
+  //   while (1) { delay(10); }
+  // }
 
-  if (! ina219_PMM.begin(&CurrentBus)) {
-    Serial.println("Failed to find PMM chip");
-    while (1) { delay(10); }
-  }
+  // if (! ina219_PMM.begin(&CurrentBus)) {
+  //   Serial.println("Failed to find PMM chip");
+  //   while (1) { delay(10); }
+  // }
 
-  if (! ina219_MOTORS.begin(&CurrentBus)) {
-    Serial.println("Failed to find Motor Output chip");
-    while (1) { delay(10); }
-  }
+  // if (! ina219_MOTORS.begin(&CurrentBus)) {
+  //   Serial.println("Failed to find Motor Output chip");
+  //   while (1) { delay(10); }
+  // }
 
 
   // Configure GPIOs for PWM
@@ -132,21 +133,28 @@ void loop() {
     break;
 
   }
+  if(micros() % 1000 ==0){
   Serial.print("Duty Cycle:   "); Serial.print(dutyCycle); Serial.print(" % ");
   Serial.print("Bus Voltage:   "); Serial.print(busvoltage); Serial.print(" V ");
   Serial.print("my current:       "); Serial.print(mycurrent); Serial.println(" A");
+  //Serial.print("TIME Micros:       "); Serial.print(micros()); Serial.println(" us");
+  }
+
   
 
   outputPWM(dutyCycle);
+  // if(micros() > 1000000){
+  //   STATE = 1;
+  // }
 
 
 }
 
 
-void setup1(){
+// void setup1(){
 
-}
+// }
 
-void loop1(){
+// void loop1(){
 
-}
+// }
