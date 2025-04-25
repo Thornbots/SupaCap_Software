@@ -32,21 +32,21 @@ void outputPWM(float dutyCycle) {
   pwm_set_chan_level(SLICE_NUM, PWM_CHAN_B, levelB);
 }
 
-void stopPWM(){
-  while(1){
+  //sets both pwm outputs low then disables PWM.
+void stopPWM() {
   pinMode(16, OUTPUT);
-  digitalWrite(16, LOW);
   pinMode(17, OUTPUT);
+  digitalWrite(16, LOW);
   digitalWrite(17, LOW);
-  }
+  pwm_set_enabled(SLICE_NUM, false);
 }
 
 
 void setup() {
   Serial.begin(115200);
   while (!Serial) {
-      // will pause until serial console opens DO NOT INCLUDE ON FINAL CODE 
-      delay(1);
+    // will pause until serial console opens DO NOT INCLUDE ON FINAL CODE
+    delay(1);
   }
 
   // if (! ina219_CAPBANK.begin(&CurrentBus)) {
@@ -76,7 +76,7 @@ void setup() {
   pwm_hw->slice[SLICE_NUM].csr |= (1 << PWM_CH0_CSR_PH_CORRECT_LSB);  // Center-aligned
   pwm_hw->slice[SLICE_NUM].csr |= (1 << PWM_CH0_CSR_B_INV_LSB);       // Invert B
 
-  //start pwm 
+  //start pwm
   pwm_set_enabled(SLICE_NUM, true);
 
   //log last time to prevent transient spike
@@ -94,67 +94,77 @@ int STATE = 0;
 void loop() {
   float busvoltage = 0;
   float mycurrent = 0;
-  float dutyCycle = 0.01; //tbd if needed, could stop weird transient effects of slamming to 0, bc to stop we really want both pwm 0, not 0 duty cycle
+  float dutyCycle = 0.01;  //tbd if needed, could stop weird transient effects of slamming to 0, bc to stop we really want both pwm 0, not 0 duty cycle
 
 
   //HARD STOP ON CHARGING IF TOO HIGH
-  if(busvoltage >= STOP_VOLTAGE){
+  if (busvoltage >= STOP_VOLTAGE) {
     stopPWM();
   }
 
-  busvoltage = ina219_CAPBANK.getBusVoltage_V();
-  mycurrent = ina219_CAPBANK.getShuntVoltage_mV()/10.0;
+  //busvoltage = ina219_CAPBANK.getBusVoltage_V();
+  //mycurrent = ina219_CAPBANK.getShuntVoltage_mV()/10.0;
 
 
 
 
   //TODO: Change state transitions to be a result of i2c, and make target current controlled by i2c aswell
-  float testCurrent = 0; //replace with targetcurrent
-  if(busvoltage >= 12){
+  float testCurrent = 0;  //replace with targetcurrent
+  if (busvoltage >= 12) {
     STATE = 1;
     testCurrent = 0.1f;
   }
 
-  switch (STATE){
-    case 0: //charge
-      dutyCycle = (0.02 + busvoltage)/24; //derived* for ~0.5A charging
-    break;
+  switch (STATE) {
+    case 0:  //charge
+      dutyCycle = (0.02 + busvoltage) / 24;  //derived* for ~0.5A charging
+      break;
 
-    case 1: //discharge according to i2c
+    case 1:  //discharge according to i2c
       stopPWM();
-    break;
+      break;
 
-    case 2: //end of match discharge (do nothing b/c implemented in HW)
+    case 2:  //end of match discharge (do nothing b/c implemented in HW)
       stopPWM();
-    break;
+      break;
 
-    default: //do nothing
+    default:  //do nothing
       stopPWM();
-    break;
-
-  }
-  if(micros() % 1000 ==0){
-  Serial.print("Duty Cycle:   "); Serial.print(dutyCycle); Serial.print(" % ");
-  Serial.print("Bus Voltage:   "); Serial.print(busvoltage); Serial.print(" V ");
-  Serial.print("my current:       "); Serial.print(mycurrent); Serial.println(" A");
-  //Serial.print("TIME Micros:       "); Serial.print(micros()); Serial.println(" us");
+      break;
   }
 
-  
+  {
+    long milisBetweenSerial = 100;
+    long startTime = 0;
+    long currentTime = millis();
+    if (currentTime - startTime > milisBetweenSerial) {
+      startTime = currentTime;
+      Serial.print("Duty Cycle:   ");
+      Serial.print(dutyCycle);
+      Serial.print(" % ");
+      Serial.print("Bus Voltage:  ");
+      Serial.print(busvoltage);
+      Serial.print(" V ");
+      Serial.print("my current:   ");
+      Serial.print(mycurrent);
+      Serial.print(" A ");
+      Serial.print("TIME Micros:  ");
+      Serial.print(micros());
+      Serial.println(" us");
+    }
+  }
+
+
 
   outputPWM(dutyCycle);
-  // if(micros() > 1000000){
-  //   STATE = 1;
-  // }
-
-
+  if (millis() > 5000) {
+    STATE = 1;
+  }
 }
 
 
 // void setup1(){
-
 // }
 
 // void loop1(){
-
 // }
