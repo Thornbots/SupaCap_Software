@@ -25,6 +25,8 @@ enum BoardStatus {
 #define SYS_CLOCK_HZ 125000000  // Default 125 MHz for RP2040
 const int SLICE_NUM = pwm_gpio_to_slice_num(PWM_TOP_PIN);
 const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;  // Correct calculation for center-aligned mode
+const uint32_t MAX_DUTY_CYCLE = 0.475; //higher than this results in overvolting the cap bank
+const uint32_t MIN_DUTY_CYCLE = 0.100;
 
 uint32_t levelA, levelB;
 
@@ -71,6 +73,9 @@ CoreStatusDataFrame StatusData;
 
 void outputPWM(float dutyCycle) {
   // Set duty cycle with dead time
+  dutyCycle = min(MAX_DUTY_CYCLE, dutyCycle); //sets upper bound
+  dutyCycle = max(dutyCycle, MIN_DUTY_CYCLE); //sets lower bound
+  
   levelA = dutyCycle * TOP_PWM;
   levelB = min(levelA + PWM_DEADTIME, TOP_PWM);
 
@@ -156,7 +161,6 @@ void setup() {
   //start pwm
   pwm_set_enabled(SLICE_NUM, true);
 
-
   //log last time to prevent transient spike
   //lastVoltage = ina219_CAPBANK.getBusVoltage_V();
 }
@@ -182,7 +186,6 @@ void loop() {
     stopPWM();
     StatusData.STATE = STOPPED;
   }
-
 
   float busVoltages[100];
 
