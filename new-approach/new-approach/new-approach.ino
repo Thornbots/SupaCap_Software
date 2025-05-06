@@ -65,25 +65,9 @@ struct __attribute__((packed)) CoreStatusDataFrame {
   float dutyCycle = 0.01;  //tbd if needed, could stop weird transient effects of slamming to 0, bc to stop we really want both pwm 0, not 0 duty cycle
   float targetCurrent = 0;
   long currentTimeMillis = 0;
+  volatile bool statusDataReady = false;
 };
-CoreStatusDataFrame I2CCoreStatusData;
-CoreStatusDataFrame PWMCoreStatusData;
-
-
-
-struct __attribute__((packed)) I2CCoreToPWMCorePacket {
-  BoardStatus STATE = INIT;
-  float busVoltage = 0.0;
-  float myCurrent = 0.0;
-  float targetCurrent = 0;
-  volatile bool inUse = 0;
-} I2CCoreToPWMCoreBuffer;
-
-struct __attribute__((packed)) PWMCoreToI2CCorePacket {
-  BoardStatus STATE = INIT;
-  float dutyCycle = 0.01;
-  volatile bool inUse;
-} PWMCoreToI2CCoreBuffer;
+CoreStatusDataFrame StatusData;
 
 void outputPWM(float dutyCycle) {
   // Set duty cycle with dead time
@@ -118,18 +102,19 @@ void DataBusReceiveData(int numBytes) {
       recvdata[i] = DataBus.read();
     }
     memcpy(&incomingData, recvdata, sizeof(recvdata));  //gotta be same order or it'll geek
+    StatusData.statusDataReady = true;
   }
 }  // cook here
 
 void DataBusOnRequest() {
-  uint8_t sendBuffer[sizeof(statusData)];
-  memcpy(sendBuffer, &statusData, sizeof(statusData));  //casting to bytes
+  uint8_t sendBuffer[sizeof(StatusData)];
+  memcpy(sendBuffer, &StatusData, sizeof(StatusData));  //casting to bytes
   DataBus.write(sendBuffer, sizeof(sendBuffer));
 }  // cook here
 
 
 void setup() {
-  I2CCoreStatusData.currentTimeMillis = millis();
+  StatusData.currentTimeMillis = millis();
   Serial.begin(115200);
   while (!Serial) {
     // will pause until serial console opens DO NOT INCLUDE ON FINAL CODE
@@ -156,112 +141,7 @@ void setup() {
     while (1) { delay(10); }
   }
 
-
-  //log last time to prevent transient spike
-  // lastVoltage = ina219_CAPBANK.getBusVoltage_V();
-}
-
-
-
-
-
-void loop() {
-  //to be cooked here:
-  //basically make a mutex in a struct which
-  //specifies communication
-  //packets between i2cCore and pwmCore
-  //it should block here if theres a communication
-  //being accessed by the other loop
-  while (PWMCoreToI2CCoreBuffer.inUse)
-    ;
-  {  //import values queued from other core
-    PWMCoreToI2CCoreBuffer.inUse = True;
-    I2CCoreStatusData.STATE = PWMCoreToI2CCoreBuffer.STATE;  // lowkey probably need different states between different cores, and this
-                                                             // implementation would lowkey probably let cores just pass a state back and forth??
-    I2CCoreStatusData.dutyCycle = PWMCoreToI2CCoreBuffer.dutyCycle;
-    PWMCoreToI2CCoreBuffer.inUse = False;
-  }
-
-
-  //HARD STOP ON CHARGING IF TOO HIGH
-  if (I2CCoreStatusData.busVoltage >= STOP_VOLTAGE) {
-    stopPWM();
-    I2CCoreStatusData.STATE = 1;
-  }
-
-  //statusData.busVoltage = ina219_CAPBANK.getBusVoltage_V();
-  //statusData.myCurrent = ina219_CAPBANK.getShuntVoltage_mV()/10.0;
-
-  switch (I2CCoreStatusData.STATE) {
-    case INIT:  //charge
-      break;
-
-    case STOPPED:  //discharge according to i2c
-      stopPWM();
-      I2CCoreStatusData.STATE = STOPPED;
-      break;
-
-    case CHARGING:  //end of match discharge (do nothing b/c implemented in HW)
-      stopPWM();
-      I2CCoreStatusData.STATE = STOPPED;
-      break;
-
-    case DISCHARGING:
-      stopPWM();
-      break;
-    default:  //do nothing
-      stopPWM();
-      I2CCoreStatusData.STATE = STOPPED;
-      break;
-  }
-
-  {
-    long millisBetweenSerial = 100;
-    long startTime = 0;
-    I2CCoreStatusData.currentTimeMillis = millis();
-    if (statusData.currentTimeMillis - startTime > millisBetweenSerial) {
-      startTime = I2CCoreStatusData.currentTimeMillis;
-      Serial.print("Duty Cycle:   ");
-      Serial.print(statusData.dutyCycle);
-      Serial.print(" % ");
-      Serial.print("Bus Voltage:  ");
-      Serial.print(statusData.busVoltage);
-      Serial.print(" V ");
-      Serial.print("my current:   ");
-      Serial.print(statusData.myCurrent);
-      Serial.print(" A ");
-      Serial.print("TIME Micros:  ");
-      Serial.print(statusData.currentTimeMillis);
-      Serial.println(" us");
-    }
-  }
-
-
-
-  // if (millis() > 5000) {
-  //   STATE = 1;
-  // }
-
-
-  //it should block here if theres a communication
-  //being accessed by the other loop
-  while (I2CCoreToPWMCoreBuffer.inUse)
-    ;
-  {  //import values queued from other core
-    I2CCoreToPWMCoreBuffer.inUse = True;
-
-    I2CCoreToPWMCoreBuffer.STATE;  //Issue here with round robining the STATE
-    I2CCoreToPWMCoreBuffer.dutyCycle = PWMCoreStatusData.dutyCycle;
-    I2CCoreToPWMCoreBuffer.busVoltage = PWMCoreStatusData.busVoltage;
-    I2CCoreToPWMCoreBuffer.myCurrent = PWMCoreStatusData.myCurrent;
-    I2CCoreToPWMCoreBuffer.targetCurrent = PWMCoreStatusData.targetCurrent;
-    I2CCoreToPWMCoreBuffer.inUse = False;
-  }
-}
-
-
-void setup1() {
-  PWMCoreStatusData.currentTimeMillis = millis();
+  StatusData.currentTimeMillis = millis();
   // Configure GPIOs for PWM
   gpio_set_function(PWM_TOP_PIN, GPIO_FUNC_PWM);
   gpio_set_function(PWM_BOT_PIN, GPIO_FUNC_PWM);
@@ -275,77 +155,60 @@ void setup1() {
 
   //start pwm
   pwm_set_enabled(SLICE_NUM, true);
+
+
+  //log last time to prevent transient spike
+  //lastVoltage = ina219_CAPBANK.getBusVoltage_V();
 }
 
 
 
-void loop1() {
-  //to be cooked here:
-  //basically make a mutex in a struct which
-  //specifies communication
-  //packets between i2cCore and pwmCore
-  //it should block here if theres a communication
-  //being accessed by the other loop
-  while (I2CCoreToPWMCoreBuffer.inUse)
-    ;
-  {  //import values queued from other core
-    I2CCoreToPWMCoreBuffer.inUse = True;
 
-    PWMCoreStatusData.STATE = I2CCoreToPWMCoreBuffer.STATE;  //Issue here with round robining the STATE
-    PWMCoreStatusData.busVoltage = I2CCoreToPWMCoreBuffer.busVoltage;
-    PWMCoreStatusData.myCurrent = I2CCoreToPWMCoreBuffer.myCurrent;
-    PWMCoreStatusData.targetCurrent = I2CCoreToPWMCoreBuffer.targetCurrent;
 
-    I2CCoreToPWMCoreBuffer.inUse = False;
+void loop() {
+
+  if (StatusData.statusDataReady) {
+    //maybe parse inst here??
+    StatusData.targetCurrent = incomingData.targetCurrent;
+    StatusData.statusDataReady = false;  //clear queued message
   }
 
-  PWMCoreStatusData.currentTimeMillis = millis();
-
+  //blocking i2c read every cycle????
+  StatusData.busVoltage = ina219_CAPBANK.getBusVoltage_V();
+  StatusData.myCurrent = ina219_CAPBANK.getShuntVoltage_mV() / 10.0;
 
   //HARD STOP ON CHARGING IF TOO HIGH
-  if (PWMCoreStatusData.busVoltage >= STOP_VOLTAGE) {
+  if (StatusData.busVoltage >= STOP_VOLTAGE) {
     stopPWM();
-    PWMCoreStatusData.STATE = 1;
+    StatusData.STATE = STOPPED;
   }
 
-  //statusData.busVoltage = ina219_CAPBANK.getBusVoltage_V();
-  //statusData.myCurrent = ina219_CAPBANK.getShuntVoltage_mV()/10.0;
 
   float busVoltages[100];
 
-  switch (PWMCoreStatusData.STATE) {
+  switch (StatusData.STATE) {
     case INIT:                                                     //charge
-      PWMCoreStatusData.dutyCycle = (0.02 + PWMCoreStatusData.busVoltage) / 24;  //derived* for ~0.5A charging
+      StatusData.dutyCycle = (0.02 + StatusData.busVoltage) / 24;  //derived* for ~0.5A charging
       break;
-
     case STOPPED:  //discharge according to i2c
       stopPWM();
-      PWMCoreStatusData.STATE = STOPPED;
+      StatusData.STATE = STOPPED;
       break;
 
     case CHARGING:  //end of match discharge (do nothing b/c implemented in HW)
       stopPWM();
-      PWMCoreStatusData.STATE = STOPPED;
+      StatusData.STATE = STOPPED;
       break;
 
     case DISCHARGING:
       stopPWM();
       break;
+
     default:  //do nothing
       stopPWM();
-      PWMCoreStatusData.STATE = STOPPED;
+      StatusData.STATE = STOPPED;
       break;
   }
 
-  
-  outputPWM(statusData.dutyCycle);
-
-  //update buffer with new values from
-  while (PWMCoreToI2CCoreBuffer.inUse)
-    ;
-  {  //import values queued from other core
-    PWMCoreToI2CCoreBuffer.inUse = True;
-    PWMCoreToI2CCoreBuffer.dutyCycle = PWMCoreToI2CCoreBuffer.dutyCycle;
-    PWMCoreToI2CCoreBuffer.inUse = False;
-  }
+  outputPWM(StatusData.dutyCycle);
 }
