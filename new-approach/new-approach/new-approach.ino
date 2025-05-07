@@ -64,6 +64,7 @@ Adafruit_INA219 ina219_MOTORS(0x44);
 //determined from resistors on board, we use a different resist
 static const float SHUNT_VOLTAGE_MV_TO_CURRENT_FACTOR = (1 / 10.0);
 
+int historyArrayIndex = 0;
 static const int NUM_READINGS_AVERAGED = 10;
 float voltageHistory[NUM_READINGS_AVERAGED], currentHistory[NUM_READINGS_AVERAGED];
 
@@ -214,16 +215,11 @@ void loop() {
 
   {  //update voltages
     //blocking i2c read every cycle????
-    for (int i = 0; i < NUM_READINGS_AVERAGED - 1; i++) {
-      voltageHistory[i] = voltageHistory[i + 1];
-      currentHistory[i] = currentHistory[i + 1];
-    }
-
-    voltageHistory[NUM_READINGS_AVERAGED - 1] = ina219_CAPBANK.getBusVoltage_V();
-    currentHistory[NUM_READINGS_AVERAGED - 1] = ina219_CAPBANK.getShuntVoltage_mV() * SHUNT_VOLTAGE_MV_TO_CURRENT_FACTOR;
-
-    StatusData.busVoltage = voltageHistory[NUM_READINGS_AVERAGED - 1];
-    StatusData.measuredCurrent = currentHistory[NUM_READINGS_AVERAGED - 1];
+    StatusData.busVoltage = ina219_CAPBANK.getBusVoltage_V();
+    StatusData.measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV() * SHUNT_VOLTAGE_MV_TO_CURRENT_FACTOR;
+    voltageHistory[historyArrayIndex] = StatusData.busVoltage;
+    currentHistory[historyArrayIndex] = StatusData.measuredCurrent;
+    historyArrayIndex += (historyArrayIndex + 1) % NUM_READINGS_AVERAGED; 
   }
 
   //HARD STOP ON CHARGING IF TOO HIGH
