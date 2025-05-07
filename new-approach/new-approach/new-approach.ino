@@ -6,51 +6,51 @@
 #include <Wire.h>
 #include <hardware/i2c.h>
 #include <Adafruit_INA219.h>
-//#include <I2CSlave.h>
-
-//
-enum BoardStatus {
-  INIT,
-  STOPPED,
-  ACTIVE
-};
-
-
-enum i2cInstruction {
-  INITIALIZE,
-  STOP,
-  NO_CHANGE
-};
-
-
 
 //PWM DECLARATIONS
-#define PWM_TOP_PIN 16
-#define PWM_BOT_PIN 17
-#define PWM_FREQ_HZ 100000      //100 khz
-#define PWM_DEADTIME 12         //in ticks for 504 nS deadtime
-#define SYS_CLOCK_HZ 125000000  // Default 125 MHz for RP2040
-const int SLICE_NUM = pwm_gpio_to_slice_num(PWM_TOP_PIN);
-const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;  // Correct calculation for center-aligned mode
-const float MAX_DUTY_CYCLE = 0.475;                             //higher than this results in overvolting the cap bank
-const float MIN_DUTY_CYCLE = 0.025;                             //lower than this and the caps are sad (not yet determined experimentally)
-const float STEADY_STATE_VOLTAGE_DUTY_CYCLE_FACTOR = (1.0 / 24.0);
-const float K_P = 0;
-const float MAX_ERROR = 0.01;
+static const int PWM_TOP_PIN = 16;
+static const int PWM_BOT_PIN = 17;
+//100 khz
+static const int PWM_FREQ_HZ = 100000;
+//in ticks for 504 nS deadtime
+static const int PWM_DEADTIME = 12;
+// Default 125 MHz for RP2040
+static const int SYS_CLOCK_HZ = 125000000;
+static const int SLICE_NUM = pwm_gpio_to_slice_num(PWM_TOP_PIN);
+// Correct calculation for center-aligned mode
+static const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;
+//higher than this results in overvolting the cap bank
+static const float MAX_DUTY_CYCLE = 0.475;
+//24V down to 12 V at 50% dutycycle
+static const float STEADY_STATE_VOLTAGE_DUTY_CYCLE_FACTOR = (1.0 / 24.0);
+//NEEDS TO BE SET
+static const float K_P = 0;
+//limits current swings
+static const float MAX_ERROR = 0.01;
+//(Amps)
+static const float MAX_REQUESTABLE_CURRENT = 3.0;
+//Voltage at which caps will try to stop accepting more current
+static const float MAX_RATED_VOLTAGE = 12.0;
+//voltage at which system will emergency shut off
+static const float MAX_EMERGENCY_SHUTOFF_VOLTAGE = 13.0;
 
-
-uint32_t levelA, levelB;
-
-#define TARGET_CURRENT -0.1f
-#define STOP_VOLTAGE 13
+//tbd if needed, could stop weird transient effects of slamming to 0, bc to stop we really want both pwm 0, not 0 duty cycle
+static const float STARTUP_CURRENT = -0.1;
 
 //I2C Declarations
-static const uint I2C_AS_PERIPHERAL_SDA_GPIO = 16;   //board pin 21
-static const uint I2C_AS_PERIPHERAL_SCL_GPIO = 17;   //board pin 22
-static const uint I2C_AS_PERIPHERAL_ADDRESS = 0x45;  //nice
+//PERIPEHERAL Pins
+//board pin 21
+static const uint I2C_AS_PERIPHERAL_SDA_GPIO = 16;
+//board pin 22
+static const uint I2C_AS_PERIPHERAL_SCL_GPIO = 17;
+//nice
+static const uint I2C_AS_PERIPHERAL_ADDRESS = 0x45;
 
-static const uint I2C_AS_CONTROLLER_SDA_GPIO = 18;  //board pin 24
-static const uint I2C_AS_CONTROLLER_SCL_GPIO = 19;  //board pin 25
+//I2C Pins to Sensors:
+//board pin 24
+static const uint I2C_AS_CONTROLLER_SDA_GPIO = 18;
+//board pin 25
+static const uint I2C_AS_CONTROLLER_SCL_GPIO = 19;
 
 //initializes both i2c0 and i2c1
 
@@ -61,12 +61,29 @@ TwoWire CurrentBus(I2C_AS_CONTROLLER_SDA_GPIO, I2C_AS_CONTROLLER_SCL_GPIO);
 Adafruit_INA219 ina219_CAPBANK(0x40);
 Adafruit_INA219 ina219_PMM(0x41);
 Adafruit_INA219 ina219_MOTORS(0x44);
+//determined from resistors on board, we use a different resist
+static const float SHUNT_VOLTAGE_MV_TO_CURRENT_FACTOR = (1 / 10.0);
+
+static const int NUM_READINGS_AVERAGED = 10;
+float voltageHistory[NUM_READINGS_AVERAGED], currentHistory[NUM_READINGS_AVERAGED];
+
+enum BoardStatus {
+  INIT,
+  STOPPED,
+  ACTIVE
+};
+
+enum i2cInstruction {
+  INITIALIZE,
+  STOP,
+  NO_CHANGE
+};
 
 //MIGHT NEED TO BE VOLATILE?
 //Instructions, values etc received by pico as peripheral
 struct __attribute__((packed)) receivedFrame {
   i2cInstruction currentInstruction;
-  float targetCurrent = TARGET_CURRENT;
+  float targetCurrent = STARTUP_CURRENT;
 } incomingData;
 
 //MIGHT NEED TO BE VOLATILE
@@ -75,20 +92,18 @@ struct __attribute__((packed)) CoreStatusDataFrame {
   BoardStatus STATE = INIT;
   float busVoltage = 0.0;
   float measuredCurrent = 0.0;
-  float dutyCycle = 0.01;  //tbd if needed, could stop weird transient effects of slamming to 0, bc to stop we really want both pwm 0, not 0 duty cycle
+  float dutyCycle = STARTUP_CURRENT;  //tbd if needed, see definition
   float targetCurrent = 0;
   long currentTimeMillis = 0;
-  volatile bool statusDataReady = false;
-};
-CoreStatusDataFrame StatusData;
+  volatile bool isI2CDataReceived = false;
+} StatusData;
 
 void outputPWM(float dutyCycle) {
   // Set duty cycle with dead time
   dutyCycle = min(MAX_DUTY_CYCLE, dutyCycle);  //sets upper bound
-  //dutyCycle = max(dutyCycle, MIN_DUTY_CYCLE);  //sets lower bound 
 
-  levelA = dutyCycle * TOP_PWM;
-  levelB = min(levelA + PWM_DEADTIME, TOP_PWM);
+  uint32_t levelA = dutyCycle * TOP_PWM;
+  uint32_t levelB = min(levelA + PWM_DEADTIME, TOP_PWM);
 
   //writes
   pwm_set_chan_level(SLICE_NUM, PWM_CHAN_A, levelA);
@@ -104,18 +119,19 @@ void stopPWM() {
   pwm_set_enabled(SLICE_NUM, false);
 }
 
+//When Type-C controller writes to the pico
 void DataBusReceiveData(int numBytes) {
-
   if (numBytes == sizeof(incomingData)) {
     byte recvdata[sizeof(incomingData)];
     for (int i = 0; i < numBytes; i++) {
       recvdata[i] = DataBus.read();
     }
     memcpy(&incomingData, recvdata, sizeof(recvdata));  //gotta be same order or it'll geek
-    StatusData.statusDataReady = true;
+    StatusData.isI2CDataReceived = true;
   }
 }  // cook here
 
+//when the Type-C Requests data from the pico
 void DataBusOnRequest() {
   uint8_t sendBuffer[sizeof(StatusData)];
   memcpy(sendBuffer, &StatusData, sizeof(StatusData));  //casting to bytes
@@ -130,6 +146,7 @@ void setup() {
     // will pause until serial console opens DO NOT INCLUDE ON FINAL CODE
     delay(1);
   }
+  Serial.println("Starting Up");
   //i2c0 begining
   DataBus.begin(I2C_AS_PERIPHERAL_ADDRESS);
   DataBus.onReceive(DataBusReceiveData);
@@ -140,6 +157,7 @@ void setup() {
     Serial.println("Failed to find Cap Bank chip");
     while (1) { delay(10); }
   }
+
 
   if (!ina219_PMM.begin(&CurrentBus)) {
     Serial.println("Failed to find PMM chip");
@@ -166,16 +184,17 @@ void setup() {
   //start pwm
   pwm_set_enabled(SLICE_NUM, true);
 
-  //log last time to prevent transient spike
-  //lastVoltage = ina219_CAPBANK.getBusVoltage_V();
+
+  for (int i = 1; i < NUM_READINGS_AVERAGED; i++) {  //technically we don't ever use the 0th value here bc its immediately overwritten in main loop
+    voltageHistory[i] = ina219_CAPBANK.getBusVoltage_V();
+    currentHistory[i] = ina219_CAPBANK.getShuntVoltage_mV() / 10.0;
+  }
 }
 
 
 void loop() {
-
-  if (StatusData.statusDataReady) {
+  if (StatusData.isI2CDataReceived) {
     //maybe parse inst here??
-
     switch (incomingData.currentInstruction) {  //parse instruction from i2c controller
       case INITIALIZE:
         StatusData.STATE = INIT;
@@ -190,21 +209,28 @@ void loop() {
         break;
     }
     StatusData.targetCurrent = incomingData.targetCurrent;
-    StatusData.statusDataReady = false;  //clear queued message
+    StatusData.isI2CDataReceived = false;  //clear queued message
   }
 
-  //blocking i2c read every cycle????
-  StatusData.busVoltage = ina219_CAPBANK.getBusVoltage_V();
-  StatusData.measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV() / 10.0;
+  {  //update voltages
+    //blocking i2c read every cycle????
+    for (int i = 0; i < NUM_READINGS_AVERAGED - 1; i++) {
+      voltageHistory[i] = voltageHistory[i + 1];
+      currentHistory[i] = currentHistory[i + 1];
+    }
+
+    voltageHistory[NUM_READINGS_AVERAGED - 1] = ina219_CAPBANK.getBusVoltage_V();
+    currentHistory[NUM_READINGS_AVERAGED - 1] = ina219_CAPBANK.getShuntVoltage_mV() * SHUNT_VOLTAGE_MV_TO_CURRENT_FACTOR;
+
+    StatusData.busVoltage = voltageHistory[NUM_READINGS_AVERAGED - 1];
+    StatusData.measuredCurrent = currentHistory[NUM_READINGS_AVERAGED - 1];
+  }
 
   //HARD STOP ON CHARGING IF TOO HIGH
-  if (StatusData.busVoltage >= STOP_VOLTAGE) {
+  if (StatusData.busVoltage >= MAX_EMERGENCY_SHUTOFF_VOLTAGE) {
     stopPWM();
     StatusData.STATE = STOPPED;
   }
-
-  float busVoltages[100];
-
 
   switch (StatusData.STATE) {
     case INIT:  //charge
@@ -217,14 +243,22 @@ void loop() {
 
     case ACTIVE:  //end of match discharge (do nothing b/c implemented in HW)
       {           // error calculation
-        float error = StatusData.measuredCurrent - StatusData.targetCurrent;
-        error = min(error, MAX_ERROR);  //upper limit
-        error = max(-MAX_ERROR, error);  //lower limit (negative)
+        float limitedTargetCurrent = max(-MAX_REQUESTABLE_CURRENT, StatusData.targetCurrent);
+        limitedTargetCurrent = min(StatusData.targetCurrent, MAX_REQUESTABLE_CURRENT);
 
-        float feedForward = (StatusData.busVoltage / 24.0);
+        if (StatusData.busVoltage > MAX_RATED_VOLTAGE) {
+          limitedTargetCurrent = min(limitedTargetCurrent, 0);  //forces attempt to cap voltage of caps at 12V
+        }
+
+        float error = StatusData.measuredCurrent - StatusData.targetCurrent;
+        error = max(-MAX_ERROR, error);  //lower limit (negative)
+        error = min(error, MAX_ERROR);   //upper limit
+
+        float feedForward = (StatusData.busVoltage * STEADY_STATE_VOLTAGE_DUTY_CYCLE_FACTOR);
         StatusData.dutyCycle = feedForward + (K_P * error);  //one term is voltage the other is current??
-        outputPWM(StatusData.dutyCycle);
       }
+
+      outputPWM(StatusData.dutyCycle);
       break;
 
     default:  //do nothing
@@ -232,5 +266,4 @@ void loop() {
       StatusData.STATE = STOPPED;
       break;
   }
-
 }
