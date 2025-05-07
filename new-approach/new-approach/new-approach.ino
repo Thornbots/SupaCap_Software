@@ -12,10 +12,17 @@
 enum BoardStatus {
   INIT,
   STOPPED,
-  CHARGING,
-  DISCHARGING,
-  NUM_STATES
+  ACTIVE
 };
+
+
+enum i2cInstruction {
+  INITIALIZE,
+  STOP,
+  NO_CHANGE
+};
+
+
 
 //PWM DECLARATIONS
 #define PWM_TOP_PIN 16
@@ -25,8 +32,12 @@ enum BoardStatus {
 #define SYS_CLOCK_HZ 125000000  // Default 125 MHz for RP2040
 const int SLICE_NUM = pwm_gpio_to_slice_num(PWM_TOP_PIN);
 const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;  // Correct calculation for center-aligned mode
-const uint32_t MAX_DUTY_CYCLE = 0.475; //higher than this results in overvolting the cap bank
-const uint32_t MIN_DUTY_CYCLE = 0.100;
+const float MAX_DUTY_CYCLE = 0.475;                             //higher than this results in overvolting the cap bank
+const float MIN_DUTY_CYCLE = 0.025;                             //lower than this and the caps are sad (not yet determined experimentally)
+const float STEADY_STATE_VOLTAGE_DUTY_CYCLE_FACTOR = (1.0 / 24.0);
+const float K_P = 0;
+const float MAX_ERROR = 0.01;
+
 
 uint32_t levelA, levelB;
 
@@ -54,7 +65,7 @@ Adafruit_INA219 ina219_MOTORS(0x44);
 //MIGHT NEED TO BE VOLATILE?
 //Instructions, values etc received by pico as peripheral
 struct __attribute__((packed)) receivedFrame {
-  byte currentInstruction;
+  i2cInstruction currentInstruction;
   float targetCurrent = TARGET_CURRENT;
 } incomingData;
 
@@ -63,7 +74,7 @@ struct __attribute__((packed)) receivedFrame {
 struct __attribute__((packed)) CoreStatusDataFrame {
   BoardStatus STATE = INIT;
   float busVoltage = 0.0;
-  float myCurrent = 0.0;
+  float measuredCurrent = 0.0;
   float dutyCycle = 0.01;  //tbd if needed, could stop weird transient effects of slamming to 0, bc to stop we really want both pwm 0, not 0 duty cycle
   float targetCurrent = 0;
   long currentTimeMillis = 0;
@@ -73,9 +84,9 @@ CoreStatusDataFrame StatusData;
 
 void outputPWM(float dutyCycle) {
   // Set duty cycle with dead time
-  dutyCycle = min(MAX_DUTY_CYCLE, dutyCycle); //sets upper bound
-  dutyCycle = max(dutyCycle, MIN_DUTY_CYCLE); //sets lower bound
-  
+  dutyCycle = min(MAX_DUTY_CYCLE, dutyCycle);  //sets upper bound
+  //dutyCycle = max(dutyCycle, MIN_DUTY_CYCLE);  //sets lower bound 
+
   levelA = dutyCycle * TOP_PWM;
   levelB = min(levelA + PWM_DEADTIME, TOP_PWM);
 
@@ -94,12 +105,6 @@ void stopPWM() {
 }
 
 void DataBusReceiveData(int numBytes) {
-  if (numBytes == 1) {  //here is where a control byte would be parsed
-    switch (DataBus.peek()) {
-      default:
-        break;
-    }
-  }
 
   if (numBytes == sizeof(incomingData)) {
     byte recvdata[sizeof(incomingData)];
@@ -166,20 +171,31 @@ void setup() {
 }
 
 
-
-
-
 void loop() {
 
   if (StatusData.statusDataReady) {
     //maybe parse inst here??
+
+    switch (incomingData.currentInstruction) {  //parse instruction from i2c controller
+      case INITIALIZE:
+        StatusData.STATE = INIT;
+        break;
+      case STOP:
+        StatusData.STATE = STOPPED;
+        break;
+      case NO_CHANGE:
+        break;
+      default:
+        StatusData.STATE = STOPPED;
+        break;
+    }
     StatusData.targetCurrent = incomingData.targetCurrent;
     StatusData.statusDataReady = false;  //clear queued message
   }
 
   //blocking i2c read every cycle????
   StatusData.busVoltage = ina219_CAPBANK.getBusVoltage_V();
-  StatusData.myCurrent = ina219_CAPBANK.getShuntVoltage_mV() / 10.0;
+  StatusData.measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV() / 10.0;
 
   //HARD STOP ON CHARGING IF TOO HIGH
   if (StatusData.busVoltage >= STOP_VOLTAGE) {
@@ -189,22 +205,26 @@ void loop() {
 
   float busVoltages[100];
 
+
   switch (StatusData.STATE) {
-    case INIT:                                                     //charge
-      StatusData.dutyCycle = (0.02 + StatusData.busVoltage) / 24;  //derived* for ~0.5A charging
+    case INIT:  //charge
+      //StatusData.dutyCycle = (0.02 + StatusData.busVoltage) / 24;  //derived* for ~0.5A charging
       break;
     case STOPPED:  //discharge according to i2c
       stopPWM();
       StatusData.STATE = STOPPED;
       break;
 
-    case CHARGING:  //end of match discharge (do nothing b/c implemented in HW)
-      stopPWM();
-      StatusData.STATE = STOPPED;
-      break;
+    case ACTIVE:  //end of match discharge (do nothing b/c implemented in HW)
+      {           // error calculation
+        float error = StatusData.measuredCurrent - StatusData.targetCurrent;
+        error = min(error, MAX_ERROR);  //upper limit
+        error = max(-MAX_ERROR, error);  //lower limit (negative)
 
-    case DISCHARGING:
-      stopPWM();
+        float feedForward = (StatusData.busVoltage / 24.0);
+        StatusData.dutyCycle = feedForward + (K_P * error);  //one term is voltage the other is current??
+        outputPWM(StatusData.dutyCycle);
+      }
       break;
 
     default:  //do nothing
@@ -213,5 +233,4 @@ void loop() {
       break;
   }
 
-  outputPWM(StatusData.dutyCycle);
 }
