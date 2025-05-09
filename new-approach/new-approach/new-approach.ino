@@ -9,37 +9,33 @@
 
 
 //SERIAL SETTINGS
-static const bool serialEnabled = true;
-static const long millisBetweenSerial = 500;
+static const bool serialEnabled = true; //this should probably be done with C macros but oh well
+static const bool printErrorValues = true;
+static const bool printOtherCurrentValues = true;
+static const long millisBetweenSerial = 250;
+static float       printableError = -1.0;
+static float       printableFeedForward = -1.0;
 
 
-//PWM DECLARATIONS
-static const int PWM_TOP_PIN = 16;
-static const int PWM_BOT_PIN = 17;
-//100 khz
-static const int PWM_FREQ_HZ = 100000;
-//in ticks for 504 nS deadtime
-static const int PWM_DEADTIME = 12;
-// Default 125 MHz for RP2040
-static const int SYS_CLOCK_HZ = 125000000;
-static const int SLICE_NUM = pwm_gpio_to_slice_num(PWM_TOP_PIN);
-// Correct calculation for center-aligned mode
-static const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;
-//higher than this results in overvolting the cap bank
+
+
+//CONTROL SETTINGS
+//max should be roughly 0.5, but maybe slightly over to increase speed of charging? (tbd)
 static const float MAX_DUTY_CYCLE = 0.475;
 //24V down to 12 V at 50% dutycycle
 static const float STEADY_STATE_VOLTAGE_DUTY_CYCLE_FACTOR = (1.0 / 24.0);
 //NEEDS TO BE TUNED
-static const float K_P = 0.01;
+static const float K_P = 1;
 //limits current swings
-static const float MAX_ERROR = 0.01;
+static const float MAX_ERROR = 0.05;
 //(Amps)
 static const float MAX_REQUESTABLE_CURRENT = 3.0;
 //Voltage at which caps will try to stop accepting more current
 static const float MAX_RATED_VOLTAGE = 12.0;
 //voltage at which system will emergency shut off
 static const float MAX_EMERGENCY_SHUTOFF_VOLTAGE = 13.0;
-
+//magically determined by ben, (should be overwritten before first outputPWM)
+static const float STARTUP_DUTY_CYCLE = 0.25;
 //tbd if needed, could stop weird transient effects of slamming to 0, bc to stop we really want both pwm 0, not 0 duty cycle
 static const float STARTUP_CURRENT = -0.1;
 
@@ -93,17 +89,51 @@ struct __attribute__((packed)) receivedFrame {
   float targetCurrent = STARTUP_CURRENT;
 } incomingData;
 
-//MIGHT NEED TO BE VOLATILE
 //State, data, readout values, current time, etc, sent by pico as peripheral
 struct __attribute__((packed)) CoreStatusDataFrame {
   BoardStatus STATE = INIT;
   float busVoltage = 0.0;
   float measuredCurrent = 0.0;
-  float dutyCycle = STARTUP_CURRENT;  //tbd if needed, see definition
-  float targetCurrent = 0;
+  float dutyCycle = STARTUP_DUTY_CYCLE;  //tbd if needed, see definition
+  float targetCurrent = STARTUP_CURRENT;
   long currentTimeMillis = 0;
   volatile bool isI2CDataReceived = false;
 } StatusData;
+
+
+//When Type-C controller writes to the pico
+void DataBusReceiveData(int numBytes) {
+  if (numBytes == sizeof(incomingData)) {
+    byte recvdata[sizeof(incomingData)];
+    for (int i = 0; i < numBytes; i++) {
+      recvdata[i] = DataBus.read();
+    }
+    memcpy(&incomingData, recvdata, sizeof(recvdata));  //gotta be same order or it'll geek
+    StatusData.isI2CDataReceived = true;
+  }
+}  // cook here
+
+//when the Type-C Requests data from the pico
+void DataBusOnRequest() {
+  static uint8_t sendBuffer[sizeof(StatusData)];
+  memcpy(sendBuffer, &StatusData, sizeof(StatusData));  //casting to bytes
+  DataBus.write(sendBuffer, sizeof(sendBuffer));
+}  // cook here
+
+
+//PWM DECLARATIONS
+static const int PWM_TOP_PIN = 16;
+static const int PWM_BOT_PIN = 17;
+//100 khz
+static const int PWM_FREQ_HZ = 100000;
+//in ticks for 504 nS deadtime
+static const int PWM_DEADTIME = 12;
+// Default 125 MHz for RP2040
+static const int SYS_CLOCK_HZ = 125000000;
+static const int SLICE_NUM = pwm_gpio_to_slice_num(PWM_TOP_PIN);
+// Correct calculation for center-aligned mode
+static const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;
+//higher than this results in overvolting the cap bank
 
 void outputPWM(float dutyCycle) {
   // Set duty cycle with dead time
@@ -125,25 +155,6 @@ void stopPWM() {
   digitalWrite(17, LOW);
   pwm_set_enabled(SLICE_NUM, false);
 }
-
-//When Type-C controller writes to the pico
-void DataBusReceiveData(int numBytes) {
-  if (numBytes == sizeof(incomingData)) {
-    byte recvdata[sizeof(incomingData)];
-    for (int i = 0; i < numBytes; i++) {
-      recvdata[i] = DataBus.read();
-    }
-    memcpy(&incomingData, recvdata, sizeof(recvdata));  //gotta be same order or it'll geek
-    StatusData.isI2CDataReceived = true;
-  }
-}  // cook here
-
-//when the Type-C Requests data from the pico
-void DataBusOnRequest() {
-  static uint8_t sendBuffer[sizeof(StatusData)];
-  memcpy(sendBuffer, &StatusData, sizeof(StatusData));  //casting to bytes
-  DataBus.write(sendBuffer, sizeof(sendBuffer));
-}  // cook here
 
 
 void setup() {
@@ -259,12 +270,16 @@ void loop() {
           limitedTargetCurrent = max(limitedTargetCurrent, 0);  //forces attempt to cap voltage of caps at 12V (negative current is into caps)
         }
 
-        float error = StatusData.measuredCurrent - StatusData.targetCurrent;
+        float error = StatusData.targetCurrent- StatusData.measuredCurrent;
         error = max(-MAX_ERROR, error);  //lower limit (negative)
         error = min(error, MAX_ERROR);   //upper limit
 
         float feedForward = (StatusData.busVoltage * STEADY_STATE_VOLTAGE_DUTY_CYCLE_FACTOR);
         StatusData.dutyCycle = feedForward + (K_P * error);  //one term is voltage the other is current??
+        if(printErrorValues){
+          printableError = error;
+          printableFeedForward = feedForward;
+        }
       }
 
       outputPWM(StatusData.dutyCycle);
@@ -294,6 +309,19 @@ void loop() {
       Serial.print("Target Current:   ");
       Serial.print(StatusData.targetCurrent);
       Serial.print(" A ");
+      if(printErrorValues){
+        Serial.print("Computed Error:   ");
+        Serial.print(printableError);
+        Serial.print(" A ");
+        Serial.print("Computed FeedForward:   ");
+        Serial.print(printableFeedForward);
+        Serial.print(" % ");
+      }
+      if(printOtherCurrentValues){
+        Serial.print("SecondCurrent:   ");
+        Serial.print(ina219_MOTORS.getShuntVoltage_mV() / SHUNT_VOLTAGE_RESISTOR_MILI_OHM);
+        Serial.print(" A ");
+      }
       Serial.print("Time Milis:  ");
       Serial.print(StatusData.currentTimeMillis);
       Serial.println(" ms");
