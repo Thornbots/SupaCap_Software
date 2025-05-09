@@ -7,6 +7,12 @@
 #include <hardware/i2c.h>
 #include <Adafruit_INA219.h>
 
+
+//SERIAL SETTINGS
+static const bool serialEnabled = true;
+static const long millisBetweenSerial = 500;
+
+
 //PWM DECLARATIONS
 static const int PWM_TOP_PIN = 16;
 static const int PWM_BOT_PIN = 17;
@@ -64,7 +70,7 @@ Adafruit_INA219 ina219_MOTORS(0x44);
 //determined from resistors on board, we use a different resist
 static const float SHUNT_VOLTAGE_RESISTOR_MILI_OHM = 10.0;
 
-int historyArrayIndex = 0;
+static int historyArrayIndex = 0;
 static const int NUM_READINGS_AVERAGED = 10;
 float voltageHistory[NUM_READINGS_AVERAGED], currentHistory[NUM_READINGS_AVERAGED];
 
@@ -134,7 +140,7 @@ void DataBusReceiveData(int numBytes) {
 
 //when the Type-C Requests data from the pico
 void DataBusOnRequest() {
-  uint8_t sendBuffer[sizeof(StatusData)];
+  static uint8_t sendBuffer[sizeof(StatusData)];
   memcpy(sendBuffer, &StatusData, sizeof(StatusData));  //casting to bytes
   DataBus.write(sendBuffer, sizeof(sendBuffer));
 }  // cook here
@@ -142,12 +148,14 @@ void DataBusOnRequest() {
 
 void setup() {
   StatusData.currentTimeMillis = millis();
-  Serial.begin(115200);
-  while (!Serial) {
-    // will pause until serial console opens DO NOT INCLUDE ON FINAL CODE
-    delay(1);
+  if (serialEnabled) {
+    Serial.begin(115200);
+    while (!Serial) {
+      // will pause until serial console opens DO NOT INCLUDE ON FINAL CODE
+      delay(1);
+    }
+    Serial.println("Starting Up");
   }
-  Serial.println("Starting Up");
   //i2c0 begining
   DataBus.begin(I2C_AS_PERIPHERAL_ADDRESS);
   DataBus.onReceive(DataBusReceiveData);
@@ -155,18 +163,18 @@ void setup() {
 
   //i2c1 begining
   if (!ina219_CAPBANK.begin(&CurrentBus)) {
-    Serial.println("Failed to find Cap Bank chip");
+    if (serialEnabled) Serial.println("Failed to find Cap Bank chip");
     while (1) { delay(10); }
   }
 
 
   if (!ina219_PMM.begin(&CurrentBus)) {
-    Serial.println("Failed to find PMM chip");
+    if (serialEnabled) Serial.println("Failed to find PMM chip");
     while (1) { delay(10); }
   }
 
   if (!ina219_MOTORS.begin(&CurrentBus)) {
-    Serial.println("Failed to find Motor Output chip");
+    if (serialEnabled) Serial.println("Failed to find Motor Output chip");
     while (1) { delay(10); }
   }
 
@@ -190,6 +198,8 @@ void setup() {
     voltageHistory[i] = ina219_CAPBANK.getBusVoltage_V();
     currentHistory[i] = ina219_CAPBANK.getShuntVoltage_mV() / SHUNT_VOLTAGE_RESISTOR_MILI_OHM;
   }
+
+  if (serialEnabled) Serial.println("Entering Main Loop");
 }
 
 
@@ -233,6 +243,7 @@ void loop() {
       //StatusData.dutyCycle = (0.02 + StatusData.busVoltage) / 24;  //derived* for ~0.5A charging
       StatusData.STATE = ACTIVE;
       break;
+
     case STOPPED:  //discharge according to i2c
       stopPWM();
       StatusData.STATE = STOPPED;
@@ -240,6 +251,7 @@ void loop() {
 
     case ACTIVE:  //end of match discharge (do nothing b/c implemented in HW)
       {           // error calculation
+
         float limitedTargetCurrent = max(-MAX_REQUESTABLE_CURRENT, StatusData.targetCurrent);
         limitedTargetCurrent = min(StatusData.targetCurrent, MAX_REQUESTABLE_CURRENT);
 
@@ -262,5 +274,29 @@ void loop() {
       stopPWM();
       StatusData.STATE = STOPPED;
       break;
+  }
+
+
+  if (serialEnabled) {
+    static long startTime = 0;
+    StatusData.currentTimeMillis = millis();
+    if (StatusData.currentTimeMillis - startTime > millisBetweenSerial) {
+      startTime = StatusData.currentTimeMillis;
+      Serial.print("Duty Cycle:   ");
+      Serial.print(StatusData.dutyCycle);
+      Serial.print(" % ");
+      Serial.print("Bus Voltage:  ");
+      Serial.print(StatusData.busVoltage);
+      Serial.print(" V ");
+      Serial.print("Measured Current:   ");
+      Serial.print(StatusData.measuredCurrent);
+      Serial.print(" A ");
+      Serial.print("Target Current:   ");
+      Serial.print(StatusData.targetCurrent);
+      Serial.print(" A ");
+      Serial.print("Time Milis:  ");
+      Serial.print(StatusData.currentTimeMillis);
+      Serial.println(" ms");
+    }
   }
 }
