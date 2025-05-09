@@ -23,8 +23,8 @@ static const uint32_t TOP_PWM = SYS_CLOCK_HZ / (PWM_FREQ_HZ * 2) - 1;
 static const float MAX_DUTY_CYCLE = 0.475;
 //24V down to 12 V at 50% dutycycle
 static const float STEADY_STATE_VOLTAGE_DUTY_CYCLE_FACTOR = (1.0 / 24.0);
-//NEEDS TO BE SET
-static const float K_P = 0;
+//NEEDS TO BE TUNED
+static const float K_P = 0.01;
 //limits current swings
 static const float MAX_ERROR = 0.01;
 //(Amps)
@@ -62,7 +62,7 @@ Adafruit_INA219 ina219_CAPBANK(0x40);
 Adafruit_INA219 ina219_PMM(0x41);
 Adafruit_INA219 ina219_MOTORS(0x44);
 //determined from resistors on board, we use a different resist
-static const float SHUNT_VOLTAGE_MV_TO_CURRENT_FACTOR = (1 / 10.0);
+static const float SHUNT_VOLTAGE_RESISTOR_MILI_OHM = 10.0;
 
 int historyArrayIndex = 0;
 static const int NUM_READINGS_AVERAGED = 10;
@@ -188,7 +188,7 @@ void setup() {
 
   for (int i = 1; i < NUM_READINGS_AVERAGED; i++) {  //technically we don't ever use the 0th value here bc its immediately overwritten in main loop
     voltageHistory[i] = ina219_CAPBANK.getBusVoltage_V();
-    currentHistory[i] = ina219_CAPBANK.getShuntVoltage_mV() / 10.0;
+    currentHistory[i] = ina219_CAPBANK.getShuntVoltage_mV() / SHUNT_VOLTAGE_RESISTOR_MILI_OHM;
   }
 }
 
@@ -216,10 +216,10 @@ void loop() {
   {  //update voltages
     //blocking i2c read every cycle????
     StatusData.busVoltage = ina219_CAPBANK.getBusVoltage_V();
-    StatusData.measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV() * SHUNT_VOLTAGE_MV_TO_CURRENT_FACTOR;
+    StatusData.measuredCurrent = ina219_CAPBANK.getShuntVoltage_mV() / SHUNT_VOLTAGE_RESISTOR_MILI_OHM;
     voltageHistory[historyArrayIndex] = StatusData.busVoltage;
     currentHistory[historyArrayIndex] = StatusData.measuredCurrent;
-    historyArrayIndex += (historyArrayIndex + 1) % NUM_READINGS_AVERAGED; 
+    historyArrayIndex = (historyArrayIndex + 1) % NUM_READINGS_AVERAGED;
   }
 
   //HARD STOP ON CHARGING IF TOO HIGH
@@ -231,6 +231,7 @@ void loop() {
   switch (StatusData.STATE) {
     case INIT:  //charge
       //StatusData.dutyCycle = (0.02 + StatusData.busVoltage) / 24;  //derived* for ~0.5A charging
+      StatusData.STATE = ACTIVE;
       break;
     case STOPPED:  //discharge according to i2c
       stopPWM();
@@ -243,7 +244,7 @@ void loop() {
         limitedTargetCurrent = min(StatusData.targetCurrent, MAX_REQUESTABLE_CURRENT);
 
         if (StatusData.busVoltage > MAX_RATED_VOLTAGE) {
-          limitedTargetCurrent = min(limitedTargetCurrent, 0);  //forces attempt to cap voltage of caps at 12V
+          limitedTargetCurrent = max(limitedTargetCurrent, 0);  //forces attempt to cap voltage of caps at 12V (negative current is into caps)
         }
 
         float error = StatusData.measuredCurrent - StatusData.targetCurrent;
